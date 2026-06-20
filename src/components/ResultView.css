@@ -97,10 +97,34 @@
 
 .result__body {
   margin-top: var(--space-4);
-  white-space: pre-wrap;
   line-height: 1.7;
   color: var(--color-ink-soft);
   font-size: var(--text-body);
+}
+
+/* Sentence translations keep their raw line breaks. */
+p.result__body {
+  white-space: pre-wrap;
+}
+
+.def__line {
+  white-space: pre-wrap;
+}
+
+/* Numbered sense heading: stronger weight and ink for scannability. */
+.def__line--sense {
+  font-weight: 600;
+  color: var(--color-ink);
+  margin-top: var(--space-3);
+}
+
+/* Example translation (Korean) sits quieter than the English example. */
+.def__line--trans {
+  color: var(--color-ink-faint);
+}
+
+.def__gap {
+  height: 0.4em;
 }
 
 .hl {

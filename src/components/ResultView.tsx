@@ -1,6 +1,7 @@
+import type { ReactNode } from "react";
 import type { LookupResult, LookupSource } from "../lib/api";
 import { playPron } from "../lib/audio";
-import { highlight } from "../lib/highlight";
+import { buildColorMap, highlightLine } from "../lib/highlight";
 import "./ResultView.css";
 
 const SOURCE_LABEL: Record<LookupSource, string> = {
@@ -13,6 +14,32 @@ const SOURCE_LABEL: Record<LookupSource, string> = {
 /** Put a blank line between the conjugation line and the first numbered sense. */
 function formatDefinition(text: string): string {
   return text.replace(/([A-Za-z']+ - [A-Za-z']+ - [A-Za-z']+)\n(\d+\. )/, "$1\n\n$2");
+}
+
+/** Matches a numbered sense line like "1. ...". */
+const SENSE_LINE = /^\d+\.\s/;
+
+/** Render the definition line by line, emphasizing numbered sense headings. */
+function renderDefinition(definition: string, keyword: string): ReactNode {
+  const text = formatDefinition(definition);
+  const colors = buildColorMap(text, keyword);
+  return text.split("\n").map((line, i) => {
+    if (line === "") {
+      return <div key={i} className="def__gap" />;
+    }
+    let cls = "def__line";
+    if (SENSE_LINE.test(line)) {
+      cls += " def__line--sense";
+    } else if (/^\s/.test(line) && /[가-힣]/.test(line)) {
+      // Indented Korean line = example translation.
+      cls += " def__line--trans";
+    }
+    return (
+      <div key={i} className={cls}>
+        {highlightLine(line, colors)}
+      </div>
+    );
+  });
 }
 
 interface ResultViewProps {
@@ -36,16 +63,17 @@ export function ResultView({ result, loading, onRefresh }: ResultViewProps) {
   }
 
   const isSentence = result.kind === "sentence";
+  // US/UK pronunciation and refresh only apply to English dictionary entries.
+  const isDictEntry = result.source === "naver" || result.source === "cache";
 
   return (
     <article className="result">
       <header className="result__head">
-        <h1 className={isSentence ? "result__title result__title--sentence" : "result__title"}>
-          {result.text}
-        </h1>
+        {/* Sentences already show the source text in the input; don't repeat it. */}
+        {!isSentence && <h1 className="result__title">{result.text}</h1>}
         <div className="result__meta">
           <div className="result__actions">
-            {!isSentence && (
+            {isDictEntry && (
               <button
                 type="button"
                 className="result__pron"
@@ -56,7 +84,7 @@ export function ResultView({ result, loading, onRefresh }: ResultViewProps) {
                 🇺🇸 발음
               </button>
             )}
-            {!isSentence && (
+            {isDictEntry && (
               <button
                 type="button"
                 className="result__pron"
@@ -67,7 +95,7 @@ export function ResultView({ result, loading, onRefresh }: ResultViewProps) {
                 🇬🇧 발음
               </button>
             )}
-            {!isSentence && (
+            {isDictEntry && (
               <button
                 type="button"
                 className="result__refresh"
@@ -82,11 +110,11 @@ export function ResultView({ result, loading, onRefresh }: ResultViewProps) {
           {result.source && <span className="result__badge">{SOURCE_LABEL[result.source]}</span>}
         </div>
       </header>
-      <p className="result__body">
-        {isSentence
-          ? result.definition
-          : highlight(formatDefinition(result.definition), result.text)}
-      </p>
+      {isSentence ? (
+        <p className="result__body">{result.definition}</p>
+      ) : (
+        <div className="result__body">{renderDefinition(result.definition, result.text)}</div>
+      )}
     </article>
   );
 }
