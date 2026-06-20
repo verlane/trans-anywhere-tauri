@@ -2,25 +2,31 @@
 //! The query must match from the first character (anchored), then the remaining
 //! characters in order anywhere in the candidate word.
 
-const MAX_SCAN: usize = 100_000;
-
 /// Anchored subsequence test: word[0] must equal query[0], then every query char
-/// appears in order. Case-insensitive.
+/// appears in order. Case-insensitive (ASCII). Avoids allocating per word so it
+/// can scan the full wordlist quickly; rejects on the first char for most words.
 fn subsequence_match(query_lower: &[char], word: &str) -> bool {
     if query_lower.is_empty() {
         return true;
     }
-    let w: Vec<char> = word.chars().flat_map(|c| c.to_lowercase()).collect();
-    if w.is_empty() || w[0] != query_lower[0] {
-        return false;
+    let mut chars = word.chars();
+    match chars.next() {
+        Some(c) if c.to_ascii_lowercase() == query_lower[0] => {}
+        _ => return false,
     }
-    let mut qi = 0;
-    for &wc in &w {
-        if qi < query_lower.len() && wc == query_lower[qi] {
+    let mut qi = 1;
+    if qi == query_lower.len() {
+        return true;
+    }
+    for wc in chars {
+        if wc.to_ascii_lowercase() == query_lower[qi] {
             qi += 1;
+            if qi == query_lower.len() {
+                return true;
+            }
         }
     }
-    qi == query_lower.len()
+    false
 }
 
 /// Port of v1 Score(): prefix length dominates, superfluous characters penalize,
@@ -54,10 +60,18 @@ pub fn suggest(query: &str, words: &[String], max_results: usize) -> Vec<String>
     }
     let query_norm: String = query_lower.iter().collect();
 
+    // Words are sorted, and matches are anchored to the first character, so only
+    // the slice whose first letter equals query[0] can match. Binary-search that
+    // range instead of scanning the whole list.
+    let first = query_lower[0];
+    let first_char = |w: &String| w.chars().next().map(|c| c.to_ascii_lowercase());
+    let lo = words.partition_point(|w| first_char(w).map_or(true, |c| c < first));
+    let hi = words.partition_point(|w| first_char(w).map_or(true, |c| c <= first));
+
     let mut matches: Vec<(f64, &str)> = Vec::new();
-    for word in words.iter().take(MAX_SCAN) {
+    for word in &words[lo..hi] {
         if subsequence_match(&query_lower, word) {
-            let word_lower: String = word.chars().flat_map(|c| c.to_lowercase()).collect();
+            let word_lower = word.to_ascii_lowercase();
             matches.push((score(&query_norm, &word_lower), word.as_str()));
         }
     }
@@ -75,10 +89,12 @@ mod tests {
     use super::*;
 
     fn sample() -> Vec<String> {
-        ["present", "pretend", "prevent", "represent", "pelican", "apple"]
+        let mut v: Vec<String> = ["present", "pretend", "prevent", "represent", "pelican", "apple"]
             .iter()
             .map(|s| s.to_string())
-            .collect()
+            .collect();
+        v.sort();
+        v
     }
 
     #[test]

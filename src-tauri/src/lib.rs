@@ -11,15 +11,20 @@ use commands::AppState;
 use std::sync::Mutex;
 use tauri::Manager;
 
-/// Load the wordlist file into memory, one word per line. Missing file -> empty list.
+/// Load the wordlist file into memory, one word per line, sorted so autocomplete
+/// can binary-search by first letter. Missing file -> empty list.
 fn load_wordlist(path: &std::path::Path) -> Vec<String> {
     match std::fs::read_to_string(path) {
-        Ok(content) => content
-            .lines()
-            .map(|l| l.trim())
-            .filter(|l| !l.is_empty())
-            .map(String::from)
-            .collect(),
+        Ok(content) => {
+            let mut words: Vec<String> = content
+                .lines()
+                .map(|l| l.trim())
+                .filter(|l| !l.is_empty())
+                .map(String::from)
+                .collect();
+            words.sort();
+            words
+        }
         Err(_) => Vec::new(),
     }
 }

@@ -91,7 +91,13 @@ function App() {
     }
     if (e.key === "Enter") {
       e.preventDefault();
-      runLookup(showSuggest && activeIndex >= 0 ? suggestions[activeIndex] : query);
+      if (showSuggest && activeIndex >= 0) {
+        const picked = suggestions[activeIndex];
+        setQuery(picked);
+        runLookup(picked);
+      } else {
+        runLookup(query);
+      }
       return;
     }
     if (e.key === "Escape") {

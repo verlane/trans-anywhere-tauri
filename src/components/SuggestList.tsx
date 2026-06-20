@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import "./SuggestList.css";
 
 interface SuggestListProps {
@@ -8,6 +9,12 @@ interface SuggestListProps {
 
 /** Floating autocomplete list. Numbered 1-9, 0 like the v1 app for quick selection. */
 export function SuggestList({ items, activeIndex, onPick }: SuggestListProps) {
+  const activeRef = useRef<HTMLLIElement>(null);
+
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
+
   if (items.length === 0) {
     return null;
   }
@@ -17,6 +24,7 @@ export function SuggestList({ items, activeIndex, onPick }: SuggestListProps) {
       {items.map((word, i) => (
         <li
           key={word}
+          ref={i === activeIndex ? activeRef : undefined}
           role="option"
           aria-selected={i === activeIndex}
           className={i === activeIndex ? "suggest__item suggest__item--active" : "suggest__item"}
