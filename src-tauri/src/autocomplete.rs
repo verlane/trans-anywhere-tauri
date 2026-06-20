@@ -65,8 +65,8 @@ pub fn suggest(query: &str, words: &[String], max_results: usize) -> Vec<String>
     // range instead of scanning the whole list.
     let first = query_lower[0];
     let first_char = |w: &String| w.chars().next().map(|c| c.to_ascii_lowercase());
-    let lo = words.partition_point(|w| first_char(w).map_or(true, |c| c < first));
-    let hi = words.partition_point(|w| first_char(w).map_or(true, |c| c <= first));
+    let lo = words.partition_point(|w| first_char(w).is_none_or(|c| c < first));
+    let hi = words.partition_point(|w| first_char(w).is_none_or(|c| c <= first));
 
     let mut matches: Vec<(f64, &str)> = Vec::new();
     for word in &words[lo..hi] {

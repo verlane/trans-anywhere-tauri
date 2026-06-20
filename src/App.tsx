@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { lookup, type LookupResult } from "./lib/api";
 import { playPron } from "./lib/audio";
 import { useSuggest } from "./hooks/useSuggest";
@@ -29,6 +30,7 @@ function App() {
   const [dismissed, setDismissed] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const runLookupRef = useRef<(text: string, force?: boolean) => void>(() => {});
 
   const suggestEnabled = !dismissed && isEnglishWordFragment(query);
   const suggestions = useSuggest(query, suggestEnabled, settings.suggestMinLength);
@@ -40,6 +42,31 @@ function App() {
 
   useEffect(() => {
     inputRef.current?.focus();
+  }, []);
+
+  // Global shortcut events from the backend.
+  useEffect(() => {
+    // Short press: focus and select the input so it can be overtyped.
+    const showP = listen("show-window", () => {
+      const el = inputRef.current;
+      if (el) {
+        el.focus();
+        el.select();
+      }
+    });
+    // Long press: the backend copied the foreground selection — search it.
+    const searchP = listen<string>("show-window-search", (e) => {
+      const text = (e.payload || "").trim();
+      inputRef.current?.focus();
+      if (text) {
+        setQuery(text);
+        runLookupRef.current(text);
+      }
+    });
+    return () => {
+      showP.then((off) => off());
+      searchP.then((off) => off());
+    };
   }, []);
 
   function autoPlay(res: LookupResult) {
@@ -66,6 +93,7 @@ function App() {
       setLoading(false);
     }
   }
+  runLookupRef.current = runLookup;
 
   function pickWord(word: string) {
     setQuery(word);

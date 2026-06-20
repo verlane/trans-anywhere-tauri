@@ -123,6 +123,26 @@
   text-align: right;
 }
 
+.settings__hotkey {
+  width: 8rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  text-align: center;
+  color: var(--color-ink);
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+  caret-color: transparent;
+}
+
+.settings__hotkey:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
 .settings__number:focus,
 .settings__select:focus {
   outline: none;

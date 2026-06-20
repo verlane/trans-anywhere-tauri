@@ -18,6 +18,7 @@ export interface Settings {
   suggestMaxResults: number;
   targetLanguage: string;
   dbPath: string;
+  hotkey: string;
 }
 
 interface RawSettings {
@@ -27,6 +28,7 @@ interface RawSettings {
   suggest_max_results: number;
   target_language: string;
   db_path: string;
+  hotkey: string;
 }
 
 export async function suggest(query: string): Promise<string[]> {
@@ -52,6 +54,7 @@ export async function getSettings(): Promise<Settings> {
     suggestMaxResults: raw.suggest_max_results,
     targetLanguage: raw.target_language,
     dbPath: raw.db_path,
+    hotkey: raw.hotkey,
   };
 }
 
@@ -63,6 +66,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
     suggest_max_results: settings.suggestMaxResults,
     target_language: settings.targetLanguage,
     db_path: settings.dbPath,
+    hotkey: settings.hotkey,
   };
   await invoke("save_settings", { settings: raw });
 }

@@ -27,6 +27,24 @@ function clampInt(value: string, min: number, max: number, fallback: number): nu
   return Math.min(max, Math.max(min, n));
 }
 
+/** Build a Tauri accelerator string (e.g. "Alt+W") from a keydown, or null. */
+function captureHotkey(e: React.KeyboardEvent): string | null {
+  const key = e.key;
+  if (key === "Control" || key === "Alt" || key === "Shift" || key === "Meta") {
+    return null;
+  }
+  const parts: string[] = [];
+  if (e.ctrlKey) parts.push("Control");
+  if (e.altKey) parts.push("Alt");
+  if (e.shiftKey) parts.push("Shift");
+  if (e.metaKey) parts.push("Super");
+  if (parts.length === 0) {
+    return null; // a global shortcut needs at least one modifier
+  }
+  parts.push(key.length === 1 ? key.toUpperCase() : key);
+  return parts.join("+");
+}
+
 export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps) {
   async function pickDb() {
     const path = await open({
@@ -100,6 +118,30 @@ export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps)
             value={settings.suggestMaxResults}
             onChange={(e) => update({ suggestMaxResults: clampInt(e.target.value, 1, 50, 20) })}
           />
+        </label>
+
+        <label className="settings__row">
+          <span className="settings__label">전역 단축키</span>
+          <div className="settings__hotkey-box">
+            <input
+              type="text"
+              className="settings__hotkey"
+              readOnly
+              value={settings.hotkey || "(없음)"}
+              placeholder="클릭 후 키 입력"
+              onKeyDown={(e) => {
+                e.preventDefault();
+                if (e.key === "Backspace" || e.key === "Delete") {
+                  update({ hotkey: "" });
+                  return;
+                }
+                const hk = captureHotkey(e);
+                if (hk) {
+                  update({ hotkey: hk });
+                }
+              }}
+            />
+          </div>
         </label>
 
         <label className="settings__row">

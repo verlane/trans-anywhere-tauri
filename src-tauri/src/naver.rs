@@ -108,7 +108,7 @@ fn build_definition(entry: &Value) -> String {
         for c in conjs {
             let tense = c.get("tense_type").and_then(as_int).unwrap_or(0);
             let content = c.get("conj_content").and_then(Value::as_str).unwrap_or("");
-            if matches!(tense, 11 | 12 | 13) && !content.is_empty() {
+            if matches!(tense, 11..=13) && !content.is_empty() {
                 tenses.push_str(&format!(" - {content}"));
             }
         }

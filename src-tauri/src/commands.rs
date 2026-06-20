@@ -185,10 +185,14 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
     settings_snapshot(&state)
 }
 
-/// Persist user settings, reconnect to a new DB if the path changed, and update
-/// the in-memory copy.
+/// Persist user settings, reconnect to a new DB if the path changed, re-register
+/// the global shortcut, and update the in-memory copy.
 #[tauri::command]
-pub fn save_settings(settings: Settings, state: State<'_, AppState>) -> Result<(), String> {
+pub fn save_settings(
+    settings: Settings,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     crate::settings::save(&state.settings_path, &settings).map_err(err)?;
 
     let new_db = resolve_db_path(&settings, &state.data_dir);
@@ -200,6 +204,10 @@ pub fn save_settings(settings: Settings, state: State<'_, AppState>) -> Result<(
             *current = new_db;
         }
     }
+
+    #[cfg(desktop)]
+    crate::apply_hotkey(&app, &settings.hotkey);
+    let _ = &app;
 
     *state
         .settings

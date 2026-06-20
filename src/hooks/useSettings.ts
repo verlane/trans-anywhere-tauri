@@ -8,6 +8,7 @@ const FALLBACK: Settings = {
   suggestMaxResults: 20,
   targetLanguage: "ko",
   dbPath: "",
+  hotkey: "Alt+W",
 };
 
 interface UseSettings {

@@ -23,6 +23,13 @@ pub struct Settings {
     /// Custom dictionary DB path. Empty means the default app-data location.
     #[serde(default)]
     pub db_path: String,
+    /// Global shortcut to show the window, e.g. "Alt+W". Empty disables it.
+    #[serde(default = "default_hotkey")]
+    pub hotkey: String,
+}
+
+fn default_hotkey() -> String {
+    "Alt+W".into()
 }
 
 fn default_accent() -> String {
@@ -47,6 +54,7 @@ impl Default for Settings {
             suggest_max_results: default_max_results(),
             target_language: default_target_language(),
             db_path: String::new(),
+            hotkey: default_hotkey(),
         }
     }
 }
