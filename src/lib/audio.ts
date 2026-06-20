@@ -1,21 +1,10 @@
-import { getPron, fetchPron } from "./api";
+import { ensurePron, type Accent } from "./api";
 
 let currentUrl: string | null = null;
 
-async function loadBytes(word: string, pronUrl: string | null): Promise<Uint8Array | null> {
-  const cached = await getPron(word);
-  if (cached) {
-    return cached;
-  }
-  if (pronUrl) {
-    return fetchPron(word, pronUrl);
-  }
-  return null;
-}
-
-/** Play the pronunciation for a word: cached BLOB first, else download by url. */
-export async function playPron(word: string, pronUrl: string | null): Promise<void> {
-  const bytes = await loadBytes(word, pronUrl);
+/** Play a word's pronunciation for the given accent (cached, else fetched). */
+export async function playPron(word: string, accent: Accent): Promise<void> {
+  const bytes = await ensurePron(word, accent);
   if (!bytes) {
     return;
   }

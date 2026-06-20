@@ -10,6 +10,11 @@ const SOURCE_LABEL: Record<LookupSource, string> = {
   "": "",
 };
 
+/** Put a blank line between the conjugation line and the first numbered sense. */
+function formatDefinition(text: string): string {
+  return text.replace(/([A-Za-z']+ - [A-Za-z']+ - [A-Za-z']+)\n(\d+\. )/, "$1\n\n$2");
+}
+
 interface ResultViewProps {
   result: LookupResult | null;
   loading: boolean;
@@ -40,15 +45,26 @@ export function ResultView({ result, loading, onRefresh }: ResultViewProps) {
         </h1>
         <div className="result__meta">
           <div className="result__actions">
-            {(result.hasPron || result.pronUrl) && (
+            {!isSentence && (
               <button
                 type="button"
                 className="result__pron"
-                onClick={() => playPron(result.text, result.pronUrl)}
-                aria-label="발음 듣기"
-                title="발음 듣기"
+                onClick={() => playPron(result.text, "us")}
+                aria-label="미국식 발음 듣기"
+                title="미국식 발음"
               >
-                ◭ 발음
+                🇺🇸 발음
+              </button>
+            )}
+            {!isSentence && (
+              <button
+                type="button"
+                className="result__pron"
+                onClick={() => playPron(result.text, "uk")}
+                aria-label="영국식 발음 듣기"
+                title="영국식 발음"
+              >
+                🇬🇧 발음
               </button>
             )}
             {!isSentence && (
@@ -67,7 +83,9 @@ export function ResultView({ result, loading, onRefresh }: ResultViewProps) {
         </div>
       </header>
       <p className="result__body">
-        {isSentence ? result.definition : highlight(result.definition, result.text)}
+        {isSentence
+          ? result.definition
+          : highlight(formatDefinition(result.definition), result.text)}
       </p>
     </article>
   );

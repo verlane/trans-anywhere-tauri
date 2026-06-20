@@ -9,7 +9,32 @@ pub struct Entry {
     pub id: i64,
     pub word: String,
     pub definition: String,
-    pub has_pron: bool,
+    pub has_us: bool,
+    pub has_uk: bool,
+}
+
+/// Pronunciation accent. US is stored in media1, UK in media2.
+#[derive(Debug, Clone, Copy)]
+pub enum Accent {
+    Us,
+    Uk,
+}
+
+impl Accent {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "us" => Some(Accent::Us),
+            "uk" => Some(Accent::Uk),
+            _ => None,
+        }
+    }
+
+    fn column(self) -> &'static str {
+        match self {
+            Accent::Us => "media1",
+            Accent::Uk => "media2",
+        }
+    }
 }
 
 const SCHEMA: &str = "
@@ -48,7 +73,7 @@ pub fn open(path: &Path) -> anyhow::Result<Connection> {
 pub fn select_entry(conn: &Connection, sl: &str, tl: &str, word: &str) -> anyhow::Result<Option<Entry>> {
     let row = conn
         .query_row(
-            "SELECT id, word, definition, media1 IS NOT NULL
+            "SELECT id, word, definition, media1 IS NOT NULL, media2 IS NOT NULL
              FROM entries
              WHERE source_language = ?1 AND target_language = ?2 AND word = ?3
              LIMIT 1",
@@ -58,7 +83,8 @@ pub fn select_entry(conn: &Connection, sl: &str, tl: &str, word: &str) -> anyhow
                     id: r.get(0)?,
                     word: r.get(1)?,
                     definition: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                    has_pron: r.get(3)?,
+                    has_us: r.get(3)?,
+                    has_uk: r.get(4)?,
                 })
             },
         )
@@ -67,16 +93,22 @@ pub fn select_entry(conn: &Connection, sl: &str, tl: &str, word: &str) -> anyhow
     Ok(row.filter(|e| !e.definition.is_empty()))
 }
 
-/// Fetch the pronunciation BLOB (media1) for a cached word, if present.
-pub fn select_pron(conn: &Connection, sl: &str, tl: &str, word: &str) -> anyhow::Result<Option<Vec<u8>>> {
+/// Fetch the pronunciation BLOB for a cached word and accent, if present.
+pub fn select_pron(
+    conn: &Connection,
+    sl: &str,
+    tl: &str,
+    word: &str,
+    accent: Accent,
+) -> anyhow::Result<Option<Vec<u8>>> {
+    let col = accent.column();
+    let sql = format!(
+        "SELECT {col} FROM entries
+         WHERE source_language = ?1 AND target_language = ?2 AND word = ?3 AND {col} IS NOT NULL
+         LIMIT 1"
+    );
     let blob = conn
-        .query_row(
-            "SELECT media1 FROM entries
-             WHERE source_language = ?1 AND target_language = ?2 AND word = ?3 AND media1 IS NOT NULL
-             LIMIT 1",
-            params![sl, tl, word],
-            |r| r.get::<_, Vec<u8>>(0),
-        )
+        .query_row(&sql, params![sl, tl, word], |r| r.get::<_, Vec<u8>>(0))
         .optional()?;
     Ok(blob)
 }
@@ -118,13 +150,21 @@ pub fn upsert_entry(
     Ok(())
 }
 
-/// Update only the pronunciation BLOB for an existing word (definition untouched).
-pub fn update_pron(conn: &Connection, sl: &str, tl: &str, word: &str, media1: &[u8]) -> anyhow::Result<()> {
-    conn.execute(
-        "UPDATE entries SET media1 = ?1
+/// Update only the pronunciation BLOB for an existing word and accent (definition untouched).
+pub fn update_pron(
+    conn: &Connection,
+    sl: &str,
+    tl: &str,
+    word: &str,
+    accent: Accent,
+    blob: &[u8],
+) -> anyhow::Result<()> {
+    let sql = format!(
+        "UPDATE entries SET {} = ?1
          WHERE source_language = ?2 AND target_language = ?3 AND word = ?4",
-        params![media1, sl, tl, word],
-    )?;
+        accent.column()
+    );
+    conn.execute(&sql, params![blob, sl, tl, word])?;
     Ok(())
 }
 
@@ -145,10 +185,24 @@ mod tests {
         let entry = select_entry(&conn, "en", "ko", "present").unwrap().unwrap();
         assert_eq!(entry.word, "present");
         assert_eq!(entry.definition, "현재의");
-        assert!(entry.has_pron);
+        assert!(entry.has_us);
+        assert!(!entry.has_uk);
 
-        let pron = select_pron(&conn, "en", "ko", "present").unwrap().unwrap();
-        assert_eq!(pron, vec![1, 2, 3]);
+        let us = select_pron(&conn, "en", "ko", "present", Accent::Us).unwrap().unwrap();
+        assert_eq!(us, vec![1, 2, 3]);
+        assert!(select_pron(&conn, "en", "ko", "present", Accent::Uk).unwrap().is_none());
+    }
+
+    #[test]
+    fn update_pron_writes_uk_column() {
+        let conn = mem();
+        upsert_entry(&conn, "en", "ko", "schedule", "일정", None).unwrap();
+        update_pron(&conn, "en", "ko", "schedule", Accent::Uk, &[9, 8, 7]).unwrap();
+        let entry = select_entry(&conn, "en", "ko", "schedule").unwrap().unwrap();
+        assert!(!entry.has_us);
+        assert!(entry.has_uk);
+        let uk = select_pron(&conn, "en", "ko", "schedule", Accent::Uk).unwrap().unwrap();
+        assert_eq!(uk, vec![9, 8, 7]);
     }
 
     #[test]

@@ -6,9 +6,34 @@
   gap: var(--space-2);
 }
 
+.app__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+}
+
 .app__search {
   position: relative;
+  flex: 1;
+}
+
+.app__gear {
   flex: none;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: var(--color-ink-faint);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-2);
+  border-radius: 99px;
+  transition: color var(--duration) var(--ease), transform var(--duration) var(--ease);
+}
+
+.app__gear:hover {
+  color: var(--color-accent);
+  transform: rotate(45deg);
 }
 
 .app__input {

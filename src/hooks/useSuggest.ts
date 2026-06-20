@@ -2,14 +2,13 @@ import { useEffect, useState } from "react";
 import { suggest } from "../lib/api";
 
 const DEBOUNCE_MS = 130;
-const MIN_LENGTH = 2;
 
 /** Returns debounced autocomplete suggestions for an in-progress English word. */
-export function useSuggest(query: string, enabled: boolean): string[] {
+export function useSuggest(query: string, enabled: boolean, minLength: number): string[] {
   const [results, setResults] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!enabled || query.trim().length < MIN_LENGTH) {
+    if (!enabled || query.trim().length < minLength) {
       setResults([]);
       return;
     }
@@ -32,7 +31,7 @@ export function useSuggest(query: string, enabled: boolean): string[] {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, enabled]);
+  }, [query, enabled, minLength]);
 
   return results;
 }

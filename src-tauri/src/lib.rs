@@ -5,6 +5,7 @@ mod google;
 mod http;
 mod lang;
 mod naver;
+mod settings;
 
 use commands::AppState;
 use std::sync::Mutex;
@@ -27,26 +28,34 @@ fn load_wordlist(path: &std::path::Path) -> Vec<String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir).ok();
 
-            let db_path = data_dir.join("Dictionary.db");
+            let settings_path = data_dir.join("settings.json");
+            let settings = settings::load(&settings_path);
+
+            let db_path = commands::resolve_db_path(&settings, &data_dir);
             let conn = db::open(&db_path)?;
             let words = load_wordlist(&data_dir.join("wordlist.txt"));
 
             app.manage(AppState {
                 db: Mutex::new(conn),
                 words,
-                db_path,
+                data_dir,
+                db_path: Mutex::new(db_path),
+                settings: Mutex::new(settings),
+                settings_path,
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::suggest,
             commands::lookup,
-            commands::get_pron,
-            commands::fetch_pron
+            commands::ensure_pron,
+            commands::get_settings,
+            commands::save_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

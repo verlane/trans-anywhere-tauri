@@ -12,7 +12,8 @@ const ENTRY: &str = "https://en.dict.naver.com/api/platform/enko/entry";
 #[derive(Debug, Clone)]
 pub struct NaverResult {
     pub definition: String,
-    pub pron_url: Option<String>,
+    pub pron_us_url: Option<String>,
+    pub pron_uk_url: Option<String>,
 }
 
 async fn get_json(url: &str) -> anyhow::Result<Value> {
@@ -164,16 +165,38 @@ pub async fn english_to_korean(word: &str) -> anyhow::Result<Option<NaverResult>
         return Ok(None);
     }
 
-    let pron_url = entry
-        .pointer("/members/0/prons/0/female_pron_file")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .map(String::from);
+    let (pron_us_url, pron_uk_url) = extract_pron_urls(entry);
 
     Ok(Some(NaverResult {
         definition,
-        pron_url,
+        pron_us_url,
+        pron_uk_url,
     }))
+}
+
+/// Prefer the female recording, fall back to the male one.
+fn pron_file(p: &Value) -> Option<String> {
+    ["female_pron_file", "male_pron_file"]
+        .iter()
+        .find_map(|k| p.get(*k).and_then(Value::as_str).filter(|s| !s.is_empty()))
+        .map(String::from)
+}
+
+/// Pull the first US and UK pronunciation urls. Naver tags US audio as "A" or
+/// "C" (general American) depending on the word, and UK audio as "E".
+fn extract_pron_urls(entry: &Value) -> (Option<String>, Option<String>) {
+    let mut us = None;
+    let mut uk = None;
+    if let Some(prons) = entry.pointer("/members/0/prons").and_then(Value::as_array) {
+        for p in prons {
+            match p.get("pron_type").and_then(Value::as_str).unwrap_or("") {
+                "A" | "C" if us.is_none() => us = pron_file(p),
+                "E" if uk.is_none() => uk = pron_file(p),
+                _ => {}
+            }
+        }
+    }
+    (us, uk)
 }
 
 /// Download a pronunciation MP3 by url.
