@@ -1,0 +1,5 @@
+# Copy this file to `config.toml` and set an absolute path OUTSIDE the synced tree.
+# Building inside a Dropbox/OneDrive-synced folder causes file-lock failures
+# (os error 32) because the sync client locks target/ files mid-build.
+[build]
+target-dir = "C:/Users/YOUR_NAME/AppData/Local/transanywhere-target"

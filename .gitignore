@@ -15,6 +15,9 @@ dist-ssr
 # Claude local scratch
 .claude/tmp/
 
+# Machine-local cargo build path (use config.toml.example as a template)
+src-tauri/.cargo/config.toml
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
