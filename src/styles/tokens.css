@@ -1,0 +1,39 @@
+:root {
+  /* Warm editorial paper palette — deliberately not stock gray-on-white. */
+  --color-paper: oklch(98.2% 0.008 85);
+  --color-paper-raised: oklch(99.5% 0.006 85);
+  --color-ink: oklch(24% 0.02 270);
+  --color-ink-soft: oklch(46% 0.02 270);
+  --color-ink-faint: oklch(66% 0.015 270);
+  --color-accent: oklch(52% 0.16 255);
+  --color-accent-soft: oklch(92% 0.04 255);
+  --color-line: oklch(89% 0.01 85);
+  --color-danger: oklch(56% 0.18 25);
+
+  /* Definition highlight palette (v1: keyword=rose, past=blue, pp=orange, ing=green) */
+  --hl-kw: oklch(55% 0.19 15);
+  --hl-past: oklch(52% 0.16 255);
+  --hl-pp: oklch(58% 0.16 55);
+  --hl-ing: oklch(52% 0.14 150);
+
+  --font-head: "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif;
+  --font-body: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", "Consolas", ui-monospace, monospace;
+
+  --text-word: clamp(1.9rem, 1.4rem + 2.2vw, 2.6rem);
+  --text-section: 0.72rem;
+  --text-body: 0.98rem;
+  --text-small: 0.82rem;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow-pop: 0 12px 32px -8px oklch(24% 0.02 270 / 0.22);
+  --duration: 160ms;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
