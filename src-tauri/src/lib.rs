@@ -48,6 +48,11 @@ static HOTKEY: std::sync::Mutex<HotkeyState> = std::sync::Mutex::new(HotkeyState
     generation: 0,
 });
 
+/// Debounce counter for persisting window geometry: every move/resize bumps it,
+/// and a save only fires once the value is unchanged after a short delay.
+#[cfg(desktop)]
+static WINDOW_SAVE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Bring the main window to the front.
 #[cfg(desktop)]
 fn focus_window(app: &tauri::AppHandle) {
@@ -263,9 +268,13 @@ pub fn run() {
                     })
                     .build(app)?;
 
-                // Apply the always-on-top setting on startup.
+                // The window starts hidden (visible:false) so the window-state
+                // plugin can restore its position before it appears — otherwise it
+                // would flash at the default spot first. Apply settings, then show.
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.set_always_on_top(always_on_top);
+                    let _ = window.show();
+                    let _ = window.set_focus();
                 }
 
                 // Closing the window hides it to the tray instead of quitting.
@@ -273,23 +282,44 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") {
                     let win = window.clone();
                     let handle = app.handle().clone();
-                    window.on_window_event(move |event| match event {
-                        tauri::WindowEvent::CloseRequested { api, .. } => {
-                            api.prevent_close();
-                            let _ = win.hide();
-                        }
-                        tauri::WindowEvent::Resized(_) => {
-                            let to_tray = handle
-                                .state::<AppState>()
-                                .settings
-                                .lock()
-                                .map(|s| s.minimize_to_tray)
-                                .unwrap_or(false);
-                            if to_tray && win.is_minimized().unwrap_or(false) {
+                    window.on_window_event(move |event| {
+                        use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+                        match event {
+                            tauri::WindowEvent::CloseRequested { api, .. } => {
+                                api.prevent_close();
                                 let _ = win.hide();
                             }
+                            tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
+                                let minimized = win.is_minimized().unwrap_or(false);
+                                if !minimized {
+                                    // Debounce: persist position/size once the window
+                                    // has been still for a moment, not on every pixel.
+                                    use std::sync::atomic::Ordering;
+                                    let generation =
+                                        WINDOW_SAVE_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+                                    let save_handle = handle.clone();
+                                    std::thread::spawn(move || {
+                                        std::thread::sleep(std::time::Duration::from_millis(400));
+                                        if WINDOW_SAVE_GEN.load(Ordering::SeqCst) == generation {
+                                            let _ = save_handle.save_window_state(
+                                                StateFlags::SIZE | StateFlags::POSITION,
+                                            );
+                                        }
+                                    });
+                                } else if matches!(event, tauri::WindowEvent::Resized(_)) {
+                                    let to_tray = handle
+                                        .state::<AppState>()
+                                        .settings
+                                        .lock()
+                                        .map(|s| s.minimize_to_tray)
+                                        .unwrap_or(false);
+                                    if to_tray {
+                                        let _ = win.hide();
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     });
                 }
             }

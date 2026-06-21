@@ -63,7 +63,7 @@ fn default_translate_target_alt() -> String {
     "ja".into()
 }
 fn default_toggle_hotkey() -> String {
-    "Control+Shift+Enter".into()
+    "Shift+Enter".into()
 }
 
 impl Default for Settings {
@@ -113,7 +113,7 @@ mod tests {
         assert!(!s.auto_play);
         assert_eq!(s.translate_target, "en");
         assert_eq!(s.translate_target_alt, "ja");
-        assert_eq!(s.toggle_hotkey, "Control+Shift+Enter");
+        assert_eq!(s.toggle_hotkey, "Shift+Enter");
         assert!(!s.minimize_to_tray);
         assert!(!s.always_on_top);
     }

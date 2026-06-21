@@ -15,7 +15,8 @@
       {
         "title": "TransAnywhere",
         "width": 460,
-        "height": 640
+        "height": 640,
+        "visible": false
       }
     ],
     "security": {

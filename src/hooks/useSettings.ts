@@ -9,7 +9,7 @@ const FALLBACK: Settings = {
   suggestMaxResults: 20,
   translateTarget: "en",
   translateTargetAlt: "ja",
-  toggleHotkey: "Control+Shift+Enter",
+  toggleHotkey: "Shift+Enter",
   minimizeToTray: false,
   alwaysOnTop: false,
   dbPath: "",

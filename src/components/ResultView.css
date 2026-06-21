@@ -1,7 +1,7 @@
 .result {
   flex: 1;
   overflow-y: auto;
-  padding: var(--space-5) var(--space-5) var(--space-5) 0;
+  padding: var(--space-5) var(--space-5) calc(var(--space-5) * 2) 0;
 }
 
 .result--state {
@@ -143,6 +143,31 @@ p.result__body {
 
 .def__gap {
   height: 0.4em;
+}
+
+/* Furigana above kanji: small and quiet so the base text stays primary. */
+.def__line rt {
+  font-size: 0.7em;
+  color: var(--color-ink-faint);
+  font-weight: 400;
+  user-select: none;
+  /* Lift the furigana off the base text (relative offset keeps ruby-over layout). */
+  position: relative;
+  top: -0.3em;
+}
+
+.def__line ruby {
+  ruby-align: center;
+}
+
+/* Room above so the lifted furigana doesn't crowd the previous line. */
+.def__line--ruby {
+  padding-top: 0.55em;
+}
+
+/* Tighten the gap between a furigana example and its translation. */
+.def__line--ruby + .def__line--trans {
+  margin-top: -0.3em;
 }
 
 .hl {

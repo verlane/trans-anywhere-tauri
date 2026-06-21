@@ -1,7 +1,7 @@
 import { useState, type ReactNode, type Ref } from "react";
 import type { Accent, LookupResult, LookupSource } from "../lib/api";
 import { playPron, speakTts } from "../lib/audio";
-import { buildColorMap, highlightLine } from "../lib/highlight";
+import { buildColorMap, renderLine, hasRuby } from "../lib/highlight";
 import "./ResultView.css";
 
 const SOURCE_LABEL: Record<LookupSource, string> = {
@@ -54,9 +54,12 @@ function renderDefinition(definition: string, keyword: string): ReactNode {
       // Indented Korean line = example translation.
       cls += " def__line--trans";
     }
+    if (hasRuby(line)) {
+      cls += " def__line--ruby";
+    }
     return (
       <div key={i} className={cls}>
-        {highlightLine(line, colors)}
+        {renderLine(line, colors)}
       </div>
     );
   });

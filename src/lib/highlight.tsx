@@ -4,6 +4,13 @@ import type { ReactNode } from "react";
 const CONJ = /([a-z']+) - ([a-z']+) - ([a-z']+)/i;
 
 /**
+ * Kanji-with-furigana left in the text by clean() (the ruby `<rb>`/`<rt>` is
+ * flattened to "漢字(かな)"). Only kana inside the parens count — a Han-in-parens
+ * gloss like 사서(辭書) is left as plain text.
+ */
+const RUBY = /(\p{Script=Han}+)\(((?:\p{Script=Hiragana}|\p{Script=Katakana}|ー)+)\)/gu;
+
+/**
  * Build a lowercase word -> color-class map from the keyword and its conjugation
  * forms, computed once over the whole definition (v1 HighlightTextArray).
  */
@@ -22,29 +29,135 @@ export function buildColorMap(text: string, keyword: string): Map<string, string
   return colors;
 }
 
+/** Whether a line contains kanji-with-furigana that renderLine turns into ruby. */
+export function hasRuby(line: string): boolean {
+  RUBY.lastIndex = 0;
+  return RUBY.test(line);
+}
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Color the words of a single line using a prebuilt color map. */
-export function highlightLine(line: string, colors: Map<string, string>): ReactNode[] {
-  if (colors.size === 0) {
-    return [line];
+function hasNonAscii(s: string): boolean {
+  return [...s].some((c) => c.charCodeAt(0) > 127);
+}
+
+/** Regex for one keyword. English matches on word boundaries; others as substrings. */
+function keywordRegex(kw: string): RegExp {
+  if (hasNonAscii(kw)) {
+    return new RegExp(escapeRegExp(kw), "g");
   }
-  // English keywords match on word boundaries; non-ASCII keywords (e.g. Japanese,
-  // which has no spaces) match as substrings so 愛 lights up inside 愛憎.
-  const nonAscii = [...colors.keys()].filter((k) => [...k].some((c) => c.charCodeAt(0) > 127));
-  const pattern = nonAscii.length
-    ? `[A-Za-z']+|${nonAscii.map(escapeRegExp).join("|")}`
-    : `[A-Za-z']+`;
-  return line.split(new RegExp(`(${pattern})`)).map((part, i) => {
-    const cls = colors.get(part.toLowerCase());
-    return cls ? (
-      <span key={i} className={`hl hl--${cls}`}>
-        {part}
-      </span>
-    ) : (
-      part
+  return new RegExp(`(?<![A-Za-z'])${escapeRegExp(kw)}(?![A-Za-z'])`, "gi");
+}
+
+interface Span {
+  start: number;
+  end: number;
+  cls: string;
+}
+
+/** Keyword/conjugation spans over a line, sorted and de-overlapped. */
+function computeSpans(text: string, colors: Map<string, string>): Span[] {
+  const spans: Span[] = [];
+  for (const [kw, cls] of colors) {
+    const re = keywordRegex(kw);
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (m[0].length === 0) {
+        re.lastIndex++;
+        continue;
+      }
+      spans.push({ start: m.index, end: m.index + m[0].length, cls });
+    }
+  }
+  spans.sort((a, b) => a.start - b.start || b.end - a.end);
+  const out: Span[] = [];
+  let pos = 0;
+  for (const span of spans) {
+    if (span.start < pos) {
+      continue;
+    }
+    out.push(span);
+    pos = span.end;
+  }
+  return out;
+}
+
+/** Color one text segment (at absolute `base`) using the precomputed spans. */
+function colorSegment(
+  text: string,
+  base: number,
+  spans: Span[],
+  nextKey: () => number,
+): ReactNode[] {
+  const out: ReactNode[] = [];
+  let pos = 0;
+  for (const span of spans) {
+    const start = Math.max(0, span.start - base);
+    const end = Math.min(text.length, span.end - base);
+    if (end <= 0 || start >= text.length || start >= end) {
+      continue;
+    }
+    if (start > pos) {
+      out.push(text.slice(pos, start));
+    }
+    out.push(
+      <span key={nextKey()} className={`hl hl--${span.cls}`}>
+        {text.slice(start, end)}
+      </span>,
     );
-  });
+    pos = end;
+  }
+  if (pos < text.length) {
+    out.push(text.slice(pos));
+  }
+  return out;
+}
+
+/**
+ * Render one definition line: turn "漢字(かな)" into real ruby (furigana above),
+ * and color keyword/conjugation matches — computed over the furigana-stripped
+ * text so highlights aren't broken up by the readings.
+ */
+export function renderLine(line: string, colors: Map<string, string>): ReactNode[] {
+  const segments: Array<{ text: string; ruby?: string }> = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  RUBY.lastIndex = 0;
+  while ((m = RUBY.exec(line)) !== null) {
+    if (m.index > last) {
+      segments.push({ text: line.slice(last, m.index) });
+    }
+    segments.push({ text: m[1], ruby: m[2] });
+    last = m.index + m[0].length;
+  }
+  if (last < line.length) {
+    segments.push({ text: line.slice(last) });
+  }
+
+  const plain = segments.map((s) => s.text).join("");
+  const spans = colors.size > 0 ? computeSpans(plain, colors) : [];
+
+  const nodes: ReactNode[] = [];
+  let key = 0;
+  const nextKey = () => key++;
+  let offset = 0;
+  for (const seg of segments) {
+    const colored = colorSegment(seg.text, offset, spans, nextKey);
+    if (seg.ruby) {
+      nodes.push(
+        <ruby key={nextKey()}>
+          {colored}
+          <rt>{seg.ruby}</rt>
+        </ruby>,
+      );
+    } else {
+      for (const node of colored) {
+        nodes.push(node);
+      }
+    }
+    offset += seg.text.length;
+  }
+  return nodes;
 }
