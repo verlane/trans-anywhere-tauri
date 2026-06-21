@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type ReactNode, type Ref } from "react";
 import type { Accent, LookupResult, LookupSource } from "../lib/api";
 import { playPron, speakTts } from "../lib/audio";
 import { buildColorMap, highlightLine } from "../lib/highlight";
@@ -66,9 +66,11 @@ interface ResultViewProps {
   result: LookupResult | null;
   loading: boolean;
   onRefresh: () => void;
+  /** Ref to the scrollable result container (for keyboard scrolling). */
+  scrollRef?: Ref<HTMLElement>;
 }
 
-export function ResultView({ result, loading, onRefresh }: ResultViewProps) {
+export function ResultView({ result, loading, onRefresh, scrollRef }: ResultViewProps) {
   const [copied, setCopied] = useState(false);
 
   function copyDefinition() {
@@ -104,7 +106,7 @@ export function ResultView({ result, loading, onRefresh }: ResultViewProps) {
   const prons = pronButtons(result.lang === "ja");
 
   return (
-    <article className="result">
+    <article className="result" ref={scrollRef}>
       <header className="result__head">
         {/* Sentences already show the source text in the input; don't repeat it. */}
         {!isSentence && <h1 className="result__title">{result.text}</h1>}

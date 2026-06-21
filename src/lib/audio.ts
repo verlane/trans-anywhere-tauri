@@ -1,21 +1,50 @@
 import { ensurePron, type Accent } from "./api";
 
-let currentUrl: string | null = null;
+let audioCtx: AudioContext | null = null;
+let currentSource: AudioBufferSourceNode | null = null;
 
-/** Play a word's recorded pronunciation for the given accent (cached, else fetched). */
+/**
+ * Find where the actual sound starts, in seconds. Naver's recordings (especially
+ * the male Japanese ones) can have a long silent intro — skipping it removes the
+ * "delayed" feel. A small lead-in is kept so the first phoneme isn't clipped.
+ */
+function soundStart(buffer: AudioBuffer, threshold = 0.012): number {
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    if (Math.abs(data[i]) > threshold) {
+      return Math.max(0, i / buffer.sampleRate - 0.04);
+    }
+  }
+  return 0;
+}
+
+/** Play a word's recorded pronunciation, trimming any leading silence. */
 export async function playPron(word: string, accent: Accent): Promise<void> {
   const bytes = await ensurePron(word, accent);
   if (!bytes) {
     return;
   }
-
-  if (currentUrl) {
-    URL.revokeObjectURL(currentUrl);
+  try {
+    if (!audioCtx) {
+      audioCtx = new AudioContext();
+    }
+    if (audioCtx.state === "suspended") {
+      await audioCtx.resume();
+    }
+    const buffer = await audioCtx.decodeAudioData(bytes.slice().buffer);
+    try {
+      currentSource?.stop();
+    } catch {
+      // previous source already finished
+    }
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioCtx.destination);
+    source.start(0, soundStart(buffer));
+    currentSource = source;
+  } catch {
+    // ignore decode/playback errors
   }
-  const blob = new Blob([bytes], { type: "audio/mpeg" });
-  currentUrl = URL.createObjectURL(blob);
-  const audio = new Audio(currentUrl);
-  await audio.play().catch(() => {});
 }
 
 /** Speak text with the browser's TTS when Naver has no recording (e.g. many Japanese words). */

@@ -5,10 +5,12 @@ interface SuggestListProps {
   items: string[];
   activeIndex: number;
   onPick: (word: string) => void;
+  /** When provided, each item gets a delete button (used for search history). */
+  onDelete?: (word: string) => void;
 }
 
 /** Floating autocomplete list. Numbered 1-9, 0 like the v1 app for quick selection. */
-export function SuggestList({ items, activeIndex, onPick }: SuggestListProps) {
+export function SuggestList({ items, activeIndex, onPick, onDelete }: SuggestListProps) {
   const activeRef = useRef<HTMLLIElement>(null);
 
   useEffect(() => {
@@ -35,6 +37,21 @@ export function SuggestList({ items, activeIndex, onPick }: SuggestListProps) {
         >
           <span className="suggest__index">{i < 9 ? i + 1 : i === 9 ? 0 : ""}</span>
           <span className="suggest__word">{word}</span>
+          {onDelete && (
+            <button
+              type="button"
+              className="suggest__delete"
+              aria-label={`${word} 삭제`}
+              title="삭제"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDelete(word);
+              }}
+            >
+              ✕
+            </button>
+          )}
         </li>
       ))}
     </ul>

@@ -261,7 +261,9 @@ export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps)
                 [prettyHotkey(settings.toggleHotkey), "보조 언어로 번역"],
                 ["Enter", "검색 / 번역"],
                 ["Ctrl+Enter", "입력창 줄바꿈"],
-                ["Esc", "자동완성 닫기"],
+                ["Alt+J / Alt+K", "결과 설명 아래 / 위로 스크롤"],
+                ["↑ ↓ / Del", "히스토리 이동 / 삭제"],
+                ["Esc / ↓", "히스토리 닫기 / 다시 열기"],
               ] as ReadonlyArray<[string, string]>
             ).map(([key, desc]) => (
               <div className="settings__help-row" key={desc}>

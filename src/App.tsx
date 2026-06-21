@@ -16,6 +16,9 @@ function isEnglishWordFragment(text: string): boolean {
   return /^[a-zA-Z'-]+$/.test(text.trim());
 }
 
+/** Pixels scrolled in the result pane per Alt+J / Alt+K press. */
+const RESULT_SCROLL_STEP = 90;
+
 const EMPTY_RESULT = (text: string): LookupResult => ({
   kind: "empty",
   text,
@@ -36,12 +39,16 @@ function App() {
   const [dismissed, setDismissed] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const resultRef = useRef<HTMLElement>(null);
   const runLookupRef = useRef<(text: string, force?: boolean, alt?: boolean) => void>(() => {});
 
   const suggestEnabled = !dismissed && isEnglishWordFragment(query);
   const suggestions = useSuggest(query, suggestEnabled, settings.suggestMinLength);
   const showSuggest = suggestEnabled && suggestions.length > 0;
-  const showHistory = focused && query.trim() === "" && history.items.length > 0;
+  const showHistory =
+    !dismissed && focused && query.trim() === "" && history.items.length > 0;
+  // The currently visible dropdown (autocomplete or history) drives keyboard nav.
+  const dropdownItems = showSuggest ? suggestions : showHistory ? history.items : [];
 
   useEffect(() => {
     setActiveIndex(-1);
@@ -139,11 +146,11 @@ function App() {
     });
   }
 
-  // Handle suggestion-list navigation. Returns true if the key was consumed.
-  function handleSuggestNav(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
+  // Handle dropdown navigation (autocomplete or history). Returns true if consumed.
+  function handleDropdownNav(e: KeyboardEvent<HTMLTextAreaElement>, items: string[]): boolean {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActiveIndex((i) => Math.min(suggestions.length - 1, i + 1));
+      setActiveIndex((i) => Math.min(items.length - 1, i + 1));
       return true;
     }
     if (e.key === "ArrowUp") {
@@ -153,7 +160,49 @@ function App() {
     }
     if (e.key === "Tab") {
       e.preventDefault();
-      pickWord(suggestions[activeIndex >= 0 ? activeIndex : 0]);
+      pickWord(items[activeIndex >= 0 ? activeIndex : 0]);
+      return true;
+    }
+    return false;
+  }
+
+  // Alt+J / Alt+K scroll the result definition pane. Returns true if consumed.
+  function handleResultScroll(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
+    if (!e.altKey) {
+      return false;
+    }
+    if (e.key === "j" || e.key === "J") {
+      e.preventDefault();
+      resultRef.current?.scrollBy({ top: RESULT_SCROLL_STEP });
+      return true;
+    }
+    if (e.key === "k" || e.key === "K") {
+      e.preventDefault();
+      resultRef.current?.scrollBy({ top: -RESULT_SCROLL_STEP });
+      return true;
+    }
+    return false;
+  }
+
+  // History-specific keys: reopen with ArrowDown (after Esc), delete with Del.
+  function handleHistoryKeys(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
+    if (e.key === "ArrowDown" && dismissed && query.trim() === "" && history.items.length > 0) {
+      e.preventDefault();
+      setDismissed(false);
+      setActiveIndex(0);
+      return true;
+    }
+    if (
+      showHistory &&
+      e.key === "Delete" &&
+      activeIndex >= 0 &&
+      activeIndex < dropdownItems.length
+    ) {
+      e.preventDefault();
+      history.remove(dropdownItems[activeIndex]);
+      if (activeIndex >= dropdownItems.length - 1) {
+        setActiveIndex(activeIndex - 1);
+      }
       return true;
     }
     return false;
@@ -166,19 +215,25 @@ function App() {
       runLookup(query, false, true);
       return;
     }
+    if (handleResultScroll(e)) {
+      return;
+    }
     // Ctrl+Enter inserts a newline (Enter alone runs the search).
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
       e.preventDefault();
       insertNewline(e.currentTarget);
       return;
     }
-    if (showSuggest && handleSuggestNav(e)) {
+    if (handleHistoryKeys(e)) {
+      return;
+    }
+    if ((showSuggest || showHistory) && handleDropdownNav(e, dropdownItems)) {
       return;
     }
     if (e.key === "Enter") {
       e.preventDefault();
-      if (showSuggest && activeIndex >= 0) {
-        const picked = suggestions[activeIndex];
+      if (activeIndex >= 0 && activeIndex < dropdownItems.length) {
+        const picked = dropdownItems[activeIndex];
         setQuery(picked);
         runLookup(picked);
       } else {
@@ -218,12 +273,13 @@ function App() {
           {showHistory && (
             <SuggestList
               items={history.items}
-              activeIndex={-1}
+              activeIndex={activeIndex}
               onPick={(term) => {
                 setQuery(term);
                 setFocused(false);
                 runLookup(term);
               }}
+              onDelete={(term) => history.remove(term)}
             />
           )}
         </div>
@@ -241,6 +297,7 @@ function App() {
         result={result}
         loading={loading}
         onRefresh={() => result && runLookup(result.text, true)}
+        scrollRef={resultRef}
       />
       {showSettings && (
         <SettingsPanel settings={settings} update={update} onClose={() => setShowSettings(false)} />

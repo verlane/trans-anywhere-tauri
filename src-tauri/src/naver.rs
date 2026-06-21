@@ -124,7 +124,16 @@ fn build_definition(entry: &Value) -> String {
         .and_then(|m| m.get("show_full_name"))
         .and_then(Value::as_str)
     {
-        append(&mut out, name, "\n\n");
+        // For a kanji headword, Naver carries the reading in `audio_read`
+        // (e.g. 愛 -> あい). Show it as "愛 [あい]"; skip when it duplicates the name.
+        let reading = entry
+            .get("audio_read")
+            .and_then(Value::as_str)
+            .filter(|r| !r.is_empty() && *r != name);
+        match reading {
+            Some(r) => append(&mut out, &format!("{name} [{r}]"), "\n\n"),
+            None => append(&mut out, name, "\n\n"),
+        }
     }
 
     // Pronunciation symbols, e.g. " 동[prɪˈzent]".
@@ -324,6 +333,18 @@ mod tests {
         let (primary, secondary) = extract_pron_urls(&entry, Dict::Jako);
         assert_eq!(primary.as_deref(), Some("https://dict.example/f.mp3"));
         assert_eq!(secondary.as_deref(), Some("https://dict.example/m.mp3"));
+    }
+
+    #[test]
+    fn jako_appends_reading_for_kanji_headword() {
+        // When the headword is kanji, show the reading from `audio_read`: "愛 [あい]".
+        let entry = serde_json::json!({
+            "audio_read": "あい",
+            "members": [{ "show_full_name": "愛" }],
+            "means": [{ "origin_mean": "사랑" }]
+        });
+        let def = build_definition(&entry);
+        assert!(def.contains("愛 [あい]"), "def was: {def}");
     }
 
     #[test]
