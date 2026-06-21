@@ -222,6 +222,12 @@ async fn lookup_dict_word(
         let cached = with_db(state, |conn| db::select_entry(conn, sl, "ko", &key)).map_err(err)?;
         if let Some(entry) = cached {
             let mode = pron_mode(entry.has_us || entry.has_uk);
+            // Backfill missing pronunciation slots once, in the background, so
+            // older cached words (e.g. US-only) gain their UK audio when viewed.
+            if !(entry.media_tried || (entry.has_us && entry.has_uk)) {
+                let db_path = state.db_path.lock().map(|p| p.clone()).unwrap_or_default();
+                spawn_pron_backfill(db_path, word.clone(), dict, sl);
+            }
             return Ok(LookupResult::new(
                 "word",
                 word,
@@ -244,6 +250,12 @@ async fn lookup_dict_word(
     let key_for_def = key.clone();
     with_db(state, move |conn| {
         db::upsert_entry(conn, sl, "ko", &key_for_def, &definition, None)
+    })
+    .map_err(err)?;
+    // A fresh Naver fetch (cache miss or force-refresh) counts as an attempt.
+    let key_for_tried = key.clone();
+    with_db(state, move |conn| {
+        db::set_media_tried(conn, sl, "ko", &key_for_tried)
     })
     .map_err(err)?;
 
@@ -290,6 +302,31 @@ fn spawn_pron_download(
             if let Some(b) = uk_bytes {
                 let _ = db::update_pron(&conn, sl, "ko", &key, db::Accent::Uk, &b);
             }
+        }
+    });
+}
+
+/// Re-query Naver for a cached word with incomplete pronunciation slots, download
+/// whatever audio exists, and mark the attempt so it isn't repeated next time.
+fn spawn_pron_backfill(db_path: PathBuf, word: String, dict: naver::Dict, sl: &'static str) {
+    tokio::spawn(async move {
+        let key = word.to_lowercase();
+        let result = naver::lookup(&word, dict).await.ok().flatten();
+        let (us, uk) = match &result {
+            Some(r) => (
+                download_opt(r.pron_us_url.clone(), dict).await,
+                download_opt(r.pron_uk_url.clone(), dict).await,
+            ),
+            None => (None, None),
+        };
+        if let Ok(conn) = db::open(&db_path) {
+            if let Some(b) = us {
+                let _ = db::update_pron(&conn, sl, "ko", &key, db::Accent::Us, &b);
+            }
+            if let Some(b) = uk {
+                let _ = db::update_pron(&conn, sl, "ko", &key, db::Accent::Uk, &b);
+            }
+            let _ = db::set_media_tried(&conn, sl, "ko", &key);
         }
     });
 }

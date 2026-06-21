@@ -11,6 +11,9 @@ pub struct Entry {
     pub definition: String,
     pub has_us: bool,
     pub has_uk: bool,
+    /// Whether a pronunciation fetch was already attempted (so we don't keep
+    /// re-hitting Naver for words that simply have no recording for a slot).
+    pub media_tried: bool,
 }
 
 /// Pronunciation accent. US is stored in media1, UK in media2.
@@ -48,6 +51,7 @@ CREATE TABLE IF NOT EXISTS entries (
   definition text COLLATE NOCASE,
   media1 blob,
   media2 blob,
+  media_tried integer NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS source_language_index ON entries (source_language COLLATE NOCASE ASC);
@@ -65,6 +69,11 @@ pub fn open(path: &Path) -> anyhow::Result<Connection> {
     // pronunciation task), so wait instead of failing on a locked write.
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.execute_batch(SCHEMA)?;
+    // Migrate DBs created before media_tried existed (ignored if already present).
+    let _ = conn.execute(
+        "ALTER TABLE entries ADD COLUMN media_tried integer NOT NULL DEFAULT 0",
+        [],
+    );
     Ok(conn)
 }
 
@@ -78,7 +87,7 @@ pub fn select_entry(
 ) -> anyhow::Result<Option<Entry>> {
     let row = conn
         .query_row(
-            "SELECT id, word, definition, media1 IS NOT NULL, media2 IS NOT NULL
+            "SELECT id, word, definition, media1 IS NOT NULL, media2 IS NOT NULL, media_tried
              FROM entries
              WHERE source_language = ?1 AND target_language = ?2 AND word = ?3
              LIMIT 1",
@@ -90,12 +99,24 @@ pub fn select_entry(
                     definition: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
                     has_us: r.get(3)?,
                     has_uk: r.get(4)?,
+                    media_tried: r.get(5)?,
                 })
             },
         )
         .optional()?;
 
     Ok(row.filter(|e| !e.definition.is_empty()))
+}
+
+/// Mark that a pronunciation fetch was attempted for a word (whether or not it
+/// found audio), so background backfill won't repeatedly re-query Naver.
+pub fn set_media_tried(conn: &Connection, sl: &str, tl: &str, word: &str) -> anyhow::Result<()> {
+    conn.execute(
+        "UPDATE entries SET media_tried = 1
+         WHERE source_language = ?1 AND target_language = ?2 AND word = ?3",
+        params![sl, tl, word],
+    )?;
+    Ok(())
 }
 
 /// Fetch the pronunciation BLOB for a cached word and accent, if present.
@@ -181,6 +202,25 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(SCHEMA).unwrap();
         conn
+    }
+
+    #[test]
+    fn media_tried_defaults_false_and_can_be_set() {
+        let conn = mem();
+        upsert_entry(&conn, "en", "ko", "word", "뜻", None).unwrap();
+        assert!(
+            !select_entry(&conn, "en", "ko", "word")
+                .unwrap()
+                .unwrap()
+                .media_tried
+        );
+        set_media_tried(&conn, "en", "ko", "word").unwrap();
+        assert!(
+            select_entry(&conn, "en", "ko", "word")
+                .unwrap()
+                .unwrap()
+                .media_tried
+        );
     }
 
     #[test]
