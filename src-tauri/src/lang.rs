@@ -9,6 +9,18 @@ pub enum Lang {
     Other,
 }
 
+impl Lang {
+    /// ISO-ish code used as a translation source/target language.
+    pub fn code(self) -> &'static str {
+        match self {
+            Lang::Ko => "ko",
+            Lang::Ja => "ja",
+            Lang::En => "en",
+            Lang::Other => "other",
+        }
+    }
+}
+
 fn is_korean_char(c: char) -> bool {
     matches!(c, '\u{AC00}'..='\u{D7A3}' | '\u{3131}'..='\u{3163}')
 }
@@ -77,6 +89,14 @@ mod tests {
     #[test]
     fn detects_korean() {
         assert_eq!(detect("사전"), Lang::Ko);
+    }
+
+    #[test]
+    fn lang_code_maps_each_variant() {
+        assert_eq!(Lang::Ko.code(), "ko");
+        assert_eq!(Lang::Ja.code(), "ja");
+        assert_eq!(Lang::En.code(), "en");
+        assert_eq!(Lang::Other.code(), "other");
     }
 
     #[test]

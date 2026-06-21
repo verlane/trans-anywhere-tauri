@@ -69,7 +69,8 @@ fn clean(s: &str) -> String {
         match c {
             '<' => {
                 // Only treat `<letter...>` / `</letter...>` as a tag, matching the v1 regex.
-                let is_tag = matches!(chars.peek(), Some(n) if n.is_ascii_alphabetic() || *n == '/');
+                let is_tag =
+                    matches!(chars.peek(), Some(n) if n.is_ascii_alphabetic() || *n == '/');
                 if is_tag {
                     in_tag = true;
                 } else {
@@ -95,7 +96,8 @@ fn append(buf: &mut String, text: &str, prefix: &str) {
 /// Naver returns numeric fields as JSON strings ("11") in some places and as
 /// numbers elsewhere; accept both.
 fn as_int(v: &Value) -> Option<i64> {
-    v.as_i64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+    v.as_i64()
+        .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
 }
 
 fn pron_label(pron_type: &str) -> &'static str {
@@ -118,12 +120,18 @@ fn build_definition(entry: &Value) -> String {
     }
 
     let member = entry.pointer("/members/0");
-    if let Some(name) = member.and_then(|m| m.get("show_full_name")).and_then(Value::as_str) {
+    if let Some(name) = member
+        .and_then(|m| m.get("show_full_name"))
+        .and_then(Value::as_str)
+    {
         append(&mut out, name, "\n\n");
     }
 
     // Pronunciation symbols, e.g. " 동[prɪˈzent]".
-    if let Some(prons) = member.and_then(|m| m.get("prons")).and_then(Value::as_array) {
+    if let Some(prons) = member
+        .and_then(|m| m.get("prons"))
+        .and_then(Value::as_array)
+    {
         let mut syms = String::new();
         for p in prons {
             let ty = p.get("pron_type").and_then(Value::as_str).unwrap_or("");
@@ -159,7 +167,10 @@ fn build_definition(entry: &Value) -> String {
             }
             let prefix = if no == 1 { "\n" } else { "\n\n" };
             append(&mut block, &format!("{no}. {origin}"), prefix);
-            if let Some(ex) = m.pointer("/examples/0/origin_example").and_then(Value::as_str) {
+            if let Some(ex) = m
+                .pointer("/examples/0/origin_example")
+                .and_then(Value::as_str)
+            {
                 append(&mut block, ex, "\n  ");
             }
             if let Some(tr) = m
@@ -179,12 +190,20 @@ fn build_definition(entry: &Value) -> String {
 /// Look up a word in the given dictionary and return its Korean definition +
 /// pronunciation urls.
 pub async fn lookup(word: &str, dict: Dict) -> anyhow::Result<Option<NaverResult>> {
-    let search_url = format!("{}?range=word&query={}", dict.search_url(), urlencoding::encode(word));
+    let search_url = format!(
+        "{}?range=word&query={}",
+        dict.search_url(),
+        urlencoding::encode(word)
+    );
     let search = get_json(&search_url, dict.referer()).await?;
 
     let entry_id = search
         .pointer("/searchResultMap/searchResultListMap/WORD/items/0/entryId")
-        .and_then(|v| v.as_str().map(String::from).or_else(|| v.as_i64().map(|n| n.to_string())));
+        .and_then(|v| {
+            v.as_str()
+                .map(String::from)
+                .or_else(|| v.as_i64().map(|n| n.to_string()))
+        });
 
     let Some(entry_id) = entry_id else {
         return Ok(None);

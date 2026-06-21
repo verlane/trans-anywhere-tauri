@@ -20,9 +20,21 @@ pub struct Settings {
     /// Maximum number of suggestions to return.
     #[serde(default = "default_max_results")]
     pub suggest_max_results: usize,
-    /// Target language for sentence translation.
-    #[serde(default = "default_target_language")]
-    pub target_language: String,
+    /// Primary translation target (Enter), e.g. "en". Used by resolve_target.
+    #[serde(default = "default_translate_target")]
+    pub translate_target: String,
+    /// Secondary translation target (toggle shortcut), e.g. "ja".
+    #[serde(default = "default_translate_target_alt")]
+    pub translate_target_alt: String,
+    /// In-app shortcut to translate into the secondary target, e.g. "Control+Shift+Enter".
+    #[serde(default = "default_toggle_hotkey")]
+    pub toggle_hotkey: String,
+    /// Hide the window to the tray when minimized instead of staying on the taskbar.
+    #[serde(default)]
+    pub minimize_to_tray: bool,
+    /// Keep the window above other windows.
+    #[serde(default)]
+    pub always_on_top: bool,
     /// Custom dictionary DB path. Empty means the default app-data location.
     #[serde(default)]
     pub db_path: String,
@@ -44,8 +56,14 @@ fn default_min_length() -> usize {
 fn default_max_results() -> usize {
     20
 }
-fn default_target_language() -> String {
-    "ko".into()
+fn default_translate_target() -> String {
+    "en".into()
+}
+fn default_translate_target_alt() -> String {
+    "ja".into()
+}
+fn default_toggle_hotkey() -> String {
+    "Control+Shift+Enter".into()
 }
 
 impl Default for Settings {
@@ -56,7 +74,11 @@ impl Default for Settings {
             auto_play: false,
             suggest_min_length: default_min_length(),
             suggest_max_results: default_max_results(),
-            target_language: default_target_language(),
+            translate_target: default_translate_target(),
+            translate_target_alt: default_translate_target_alt(),
+            toggle_hotkey: default_toggle_hotkey(),
+            minimize_to_tray: false,
+            always_on_top: false,
             db_path: String::new(),
             hotkey: default_hotkey(),
         }
@@ -89,6 +111,11 @@ mod tests {
         assert_eq!(s.default_accent_ja, "us");
         assert_eq!(s.suggest_max_results, 20);
         assert!(!s.auto_play);
+        assert_eq!(s.translate_target, "en");
+        assert_eq!(s.translate_target_alt, "ja");
+        assert_eq!(s.toggle_hotkey, "Control+Shift+Enter");
+        assert!(!s.minimize_to_tray);
+        assert!(!s.always_on_top);
     }
 
     #[test]

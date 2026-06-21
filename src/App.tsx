@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { lookup, type LookupResult } from "./lib/api";
-import { playPron } from "./lib/audio";
+import { matchHotkey } from "./lib/hotkey";
+import { playPron, speakTts } from "./lib/audio";
 import { useSuggest } from "./hooks/useSuggest";
 import { useSettings } from "./hooks/useSettings";
+import { useHistory } from "./hooks/useHistory";
 import { SuggestList } from "./components/SuggestList";
 import { ResultView } from "./components/ResultView";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -20,22 +22,26 @@ const EMPTY_RESULT = (text: string): LookupResult => ({
   definition: "",
   source: "",
   lang: "",
+  pronMode: "",
 });
 
 function App() {
   const { settings, update } = useSettings();
+  const history = useHistory();
   const [query, setQuery] = useState("");
+  const [focused, setFocused] = useState(false);
   const [result, setResult] = useState<LookupResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [dismissed, setDismissed] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const runLookupRef = useRef<(text: string, force?: boolean) => void>(() => {});
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const runLookupRef = useRef<(text: string, force?: boolean, alt?: boolean) => void>(() => {});
 
   const suggestEnabled = !dismissed && isEnglishWordFragment(query);
   const suggestions = useSuggest(query, suggestEnabled, settings.suggestMinLength);
   const showSuggest = suggestEnabled && suggestions.length > 0;
+  const showHistory = focused && query.trim() === "" && history.items.length > 0;
 
   useEffect(() => {
     setActiveIndex(-1);
@@ -44,6 +50,19 @@ function App() {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Auto-grow the textarea to fit its content, capped at half the window height.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) {
+      return;
+    }
+    el.style.height = "auto";
+    const max = window.innerHeight * 0.5;
+    el.style.height = `${Math.min(el.scrollHeight, max)}px`;
+    // Only show a scrollbar once the content exceeds the cap.
+    el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
+  }, [query]);
 
   // Global shortcut events from the backend.
   useEffect(() => {
@@ -74,11 +93,15 @@ function App() {
     if (res.kind !== "word" || !settings.autoPlay) {
       return;
     }
+    if (res.pronMode === "tts") {
+      speakTts(res.text, res.lang);
+      return;
+    }
     const accent = res.lang === "ja" ? settings.defaultAccentJa : settings.defaultAccentEn;
     playPron(res.text, accent);
   }
 
-  async function runLookup(text: string, force = false) {
+  async function runLookup(text: string, force = false, alt = false) {
     const trimmed = text.trim();
     if (!trimmed) {
       return;
@@ -86,9 +109,12 @@ function App() {
     setDismissed(true);
     setLoading(true);
     try {
-      const res = await lookup(trimmed, force);
+      const res = await lookup(trimmed, force, alt);
       setResult(res);
       autoPlay(res);
+      if (res.kind !== "empty") {
+        history.add(trimmed);
+      }
     } catch {
       setResult(EMPTY_RESULT(trimmed));
     } finally {
@@ -103,20 +129,50 @@ function App() {
     inputRef.current?.focus();
   }
 
-  function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (showSuggest && e.key === "ArrowDown") {
+  // Insert a newline at the caret (Ctrl+Enter), keeping the caret after it.
+  function insertNewline(el: HTMLTextAreaElement) {
+    const start = el.selectionStart ?? query.length;
+    const end = el.selectionEnd ?? query.length;
+    setQuery(`${query.slice(0, start)}\n${query.slice(end)}`);
+    requestAnimationFrame(() => {
+      el.selectionStart = el.selectionEnd = start + 1;
+    });
+  }
+
+  // Handle suggestion-list navigation. Returns true if the key was consumed.
+  function handleSuggestNav(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
+    if (e.key === "ArrowDown") {
       e.preventDefault();
       setActiveIndex((i) => Math.min(suggestions.length - 1, i + 1));
-      return;
+      return true;
     }
-    if (showSuggest && e.key === "ArrowUp") {
+    if (e.key === "ArrowUp") {
       e.preventDefault();
       setActiveIndex((i) => Math.max(0, i - 1));
-      return;
+      return true;
     }
-    if (showSuggest && e.key === "Tab") {
+    if (e.key === "Tab") {
       e.preventDefault();
       pickWord(suggestions[activeIndex >= 0 ? activeIndex : 0]);
+      return true;
+    }
+    return false;
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    // Toggle-translate shortcut: translate into the secondary target language.
+    if (matchHotkey(e, settings.toggleHotkey)) {
+      e.preventDefault();
+      runLookup(query, false, true);
+      return;
+    }
+    // Ctrl+Enter inserts a newline (Enter alone runs the search).
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+      e.preventDefault();
+      insertNewline(e.currentTarget);
+      return;
+    }
+    if (showSuggest && handleSuggestNav(e)) {
       return;
     }
     if (e.key === "Enter") {
@@ -139,23 +195,36 @@ function App() {
     <div className="app">
       <div className="app__bar">
         <div className="app__search">
-          <input
+          <textarea
             ref={inputRef}
             className="app__input"
-            type="text"
             value={query}
-            placeholder="단어 또는 문장 입력…"
+            placeholder="단어 또는 문장 입력"
             autoComplete="off"
             autoCorrect="off"
             spellCheck={false}
+            rows={1}
             onChange={(e) => {
               setQuery(e.target.value);
               setDismissed(false);
             }}
             onKeyDown={onKeyDown}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setTimeout(() => setFocused(false), 120)}
           />
           {showSuggest && (
             <SuggestList items={suggestions} activeIndex={activeIndex} onPick={pickWord} />
+          )}
+          {showHistory && (
+            <SuggestList
+              items={history.items}
+              activeIndex={-1}
+              onPick={(term) => {
+                setQuery(term);
+                setFocused(false);
+                runLookup(term);
+              }}
+            />
           )}
         </div>
         <button

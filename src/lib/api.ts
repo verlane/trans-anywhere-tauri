@@ -4,6 +4,8 @@ export type LookupKind = "word" | "sentence" | "empty";
 export type LookupSource = "cache" | "naver" | "google" | "";
 export type Accent = "us" | "uk";
 
+export type PronMode = "recorded" | "tts" | "";
+
 export interface LookupResult {
   kind: LookupKind;
   text: string;
@@ -11,6 +13,8 @@ export interface LookupResult {
   source: LookupSource;
   /** Source language of a dictionary entry ("en" / "ja"), empty otherwise. */
   lang: string;
+  /** "recorded" = cached MP3, "tts" = synthesize on client, "" = not a dictionary entry. */
+  pronMode: PronMode;
 }
 
 export interface Settings {
@@ -21,7 +25,14 @@ export interface Settings {
   autoPlay: boolean;
   suggestMinLength: number;
   suggestMaxResults: number;
-  targetLanguage: string;
+  /** Primary translation target (Enter). */
+  translateTarget: string;
+  /** Secondary translation target (toggle shortcut). */
+  translateTargetAlt: string;
+  /** In-app shortcut to translate into the secondary target. */
+  toggleHotkey: string;
+  minimizeToTray: boolean;
+  alwaysOnTop: boolean;
   dbPath: string;
   hotkey: string;
 }
@@ -32,7 +43,11 @@ interface RawSettings {
   auto_play: boolean;
   suggest_min_length: number;
   suggest_max_results: number;
-  target_language: string;
+  translate_target: string;
+  translate_target_alt: string;
+  toggle_hotkey: string;
+  minimize_to_tray: boolean;
+  always_on_top: boolean;
   db_path: string;
   hotkey: string;
 }
@@ -41,8 +56,9 @@ export async function suggest(query: string): Promise<string[]> {
   return invoke<string[]>("suggest", { query });
 }
 
-export async function lookup(text: string, force = false): Promise<LookupResult> {
-  return invoke<LookupResult>("lookup", { text, force });
+/** `alt` (toggle shortcut) translates into the secondary target instead of using dictionaries. */
+export async function lookup(text: string, force = false, alt = false): Promise<LookupResult> {
+  return invoke<LookupResult>("lookup", { text, force, alt });
 }
 
 /** Pronunciation MP3 bytes for a word and accent: cached BLOB, else fetched from Naver. */
@@ -59,7 +75,11 @@ export async function getSettings(): Promise<Settings> {
     autoPlay: raw.auto_play,
     suggestMinLength: raw.suggest_min_length,
     suggestMaxResults: raw.suggest_max_results,
-    targetLanguage: raw.target_language,
+    translateTarget: raw.translate_target,
+    translateTargetAlt: raw.translate_target_alt,
+    toggleHotkey: raw.toggle_hotkey,
+    minimizeToTray: raw.minimize_to_tray,
+    alwaysOnTop: raw.always_on_top,
     dbPath: raw.db_path,
     hotkey: raw.hotkey,
   };
@@ -72,7 +92,11 @@ export async function saveSettings(settings: Settings): Promise<void> {
     auto_play: settings.autoPlay,
     suggest_min_length: settings.suggestMinLength,
     suggest_max_results: settings.suggestMaxResults,
-    target_language: settings.targetLanguage,
+    translate_target: settings.translateTarget,
+    translate_target_alt: settings.translateTargetAlt,
+    toggle_hotkey: settings.toggleHotkey,
+    minimize_to_tray: settings.minimizeToTray,
+    always_on_top: settings.alwaysOnTop,
     db_path: settings.dbPath,
     hotkey: settings.hotkey,
   };

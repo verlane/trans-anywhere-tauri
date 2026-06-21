@@ -7,7 +7,11 @@ const FALLBACK: Settings = {
   autoPlay: false,
   suggestMinLength: 2,
   suggestMaxResults: 20,
-  targetLanguage: "ko",
+  translateTarget: "en",
+  translateTargetAlt: "ja",
+  toggleHotkey: "Control+Shift+Enter",
+  minimizeToTray: false,
+  alwaysOnTop: false,
   dbPath: "",
   hotkey: "Alt+W",
 };

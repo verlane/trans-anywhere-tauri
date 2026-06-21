@@ -38,14 +38,19 @@
 
 .app__input {
   width: 100%;
+  display: block;
+  box-sizing: border-box;
   font-family: var(--font-head);
   font-size: 1.5rem;
+  line-height: 1.35;
   color: var(--color-ink);
   background: transparent;
   border: none;
   border-bottom: 2px solid var(--color-line);
   padding: var(--space-2) 0;
   outline: none;
+  resize: none;
+  overflow-y: auto;
   transition: border-color var(--duration) var(--ease);
 }
 

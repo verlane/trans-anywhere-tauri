@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { Accent, LookupResult, LookupSource } from "../lib/api";
-import { playPron } from "../lib/audio";
+import { playPron, speakTts } from "../lib/audio";
 import { buildColorMap, highlightLine } from "../lib/highlight";
 import "./ResultView.css";
 
@@ -69,6 +69,21 @@ interface ResultViewProps {
 }
 
 export function ResultView({ result, loading, onRefresh }: ResultViewProps) {
+  const [copied, setCopied] = useState(false);
+
+  function copyDefinition() {
+    if (!result) {
+      return;
+    }
+    navigator.clipboard.writeText(result.definition).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      },
+      () => {},
+    );
+  }
+
   if (loading) {
     return <div className="result result--state">찾는 중…</div>;
   }
@@ -96,6 +111,7 @@ export function ResultView({ result, loading, onRefresh }: ResultViewProps) {
         <div className="result__meta">
           <div className="result__actions">
             {isDictEntry &&
+              result.pronMode === "recorded" &&
               prons.map((p) => (
                 <button
                   key={p.accent}
@@ -108,6 +124,17 @@ export function ResultView({ result, loading, onRefresh }: ResultViewProps) {
                   {p.label}
                 </button>
               ))}
+            {isDictEntry && result.pronMode === "tts" && (
+              <button
+                type="button"
+                className="result__pron"
+                onClick={() => speakTts(result.text, result.lang)}
+                aria-label="TTS 발음 듣기"
+                title="TTS 발음 듣기"
+              >
+                TTS 발음
+              </button>
+            )}
             {isDictEntry && (
               <button
                 type="button"
@@ -119,6 +146,15 @@ export function ResultView({ result, loading, onRefresh }: ResultViewProps) {
                 ↻
               </button>
             )}
+            <button
+              type="button"
+              className="result__copy"
+              onClick={copyDefinition}
+              aria-label="결과 복사"
+              title="결과 복사"
+            >
+              {copied ? "복사됨" : "복사"}
+            </button>
           </div>
           {result.source && <span className="result__badge">{SOURCE_LABEL[result.source]}</span>}
         </div>

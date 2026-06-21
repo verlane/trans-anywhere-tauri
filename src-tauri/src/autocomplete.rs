@@ -89,10 +89,17 @@ mod tests {
     use super::*;
 
     fn sample() -> Vec<String> {
-        let mut v: Vec<String> = ["present", "pretend", "prevent", "represent", "pelican", "apple"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let mut v: Vec<String> = [
+            "present",
+            "pretend",
+            "prevent",
+            "represent",
+            "pelican",
+            "apple",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         v.sort();
         v
     }

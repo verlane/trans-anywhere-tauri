@@ -70,7 +70,12 @@ pub fn open(path: &Path) -> anyhow::Result<Connection> {
 
 /// Look up a cached entry. Only rows with a non-empty definition are treated as hits,
 /// matching the v1 cache-validity check.
-pub fn select_entry(conn: &Connection, sl: &str, tl: &str, word: &str) -> anyhow::Result<Option<Entry>> {
+pub fn select_entry(
+    conn: &Connection,
+    sl: &str,
+    tl: &str,
+    word: &str,
+) -> anyhow::Result<Option<Entry>> {
     let row = conn
         .query_row(
             "SELECT id, word, definition, media1 IS NOT NULL, media2 IS NOT NULL
@@ -188,9 +193,13 @@ mod tests {
         assert!(entry.has_us);
         assert!(!entry.has_uk);
 
-        let us = select_pron(&conn, "en", "ko", "present", Accent::Us).unwrap().unwrap();
+        let us = select_pron(&conn, "en", "ko", "present", Accent::Us)
+            .unwrap()
+            .unwrap();
         assert_eq!(us, vec![1, 2, 3]);
-        assert!(select_pron(&conn, "en", "ko", "present", Accent::Uk).unwrap().is_none());
+        assert!(select_pron(&conn, "en", "ko", "present", Accent::Uk)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -198,10 +207,14 @@ mod tests {
         let conn = mem();
         upsert_entry(&conn, "en", "ko", "schedule", "일정", None).unwrap();
         update_pron(&conn, "en", "ko", "schedule", Accent::Uk, &[9, 8, 7]).unwrap();
-        let entry = select_entry(&conn, "en", "ko", "schedule").unwrap().unwrap();
+        let entry = select_entry(&conn, "en", "ko", "schedule")
+            .unwrap()
+            .unwrap();
         assert!(!entry.has_us);
         assert!(entry.has_uk);
-        let uk = select_pron(&conn, "en", "ko", "schedule", Accent::Uk).unwrap().unwrap();
+        let uk = select_pron(&conn, "en", "ko", "schedule", Accent::Uk)
+            .unwrap()
+            .unwrap();
         assert_eq!(uk, vec![9, 8, 7]);
     }
 

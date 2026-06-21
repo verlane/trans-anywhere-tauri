@@ -201,6 +201,10 @@ pub fn run() {
             .build(),
     );
 
+    // Restore and persist window position/size across restarts.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+
     builder
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
@@ -209,6 +213,8 @@ pub fn run() {
             let settings_path = data_dir.join("settings.json");
             let settings = settings::load(&settings_path);
             let hotkey = settings.hotkey.clone();
+            #[cfg(desktop)]
+            let always_on_top = settings.always_on_top;
 
             let db_path = commands::resolve_db_path(&settings, &data_dir);
             let conn = db::open(&db_path)?;
@@ -257,14 +263,33 @@ pub fn run() {
                     })
                     .build(app)?;
 
+                // Apply the always-on-top setting on startup.
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_always_on_top(always_on_top);
+                }
+
                 // Closing the window hides it to the tray instead of quitting.
+                // Minimizing optionally hides to the tray too (per setting).
                 if let Some(window) = app.get_webview_window("main") {
                     let win = window.clone();
-                    window.on_window_event(move |event| {
-                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    let handle = app.handle().clone();
+                    window.on_window_event(move |event| match event {
+                        tauri::WindowEvent::CloseRequested { api, .. } => {
                             api.prevent_close();
                             let _ = win.hide();
                         }
+                        tauri::WindowEvent::Resized(_) => {
+                            let to_tray = handle
+                                .state::<AppState>()
+                                .settings
+                                .lock()
+                                .map(|s| s.minimize_to_tray)
+                                .unwrap_or(false);
+                            if to_tray && win.is_minimized().unwrap_or(false) {
+                                let _ = win.hide();
+                            }
+                        }
+                        _ => {}
                     });
                 }
             }
