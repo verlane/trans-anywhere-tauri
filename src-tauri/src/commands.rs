@@ -148,10 +148,10 @@ pub async fn lookup(
     match route(&trimmed) {
         Route::Sentence => translate_input(&trimmed, false, &state).await,
         Route::EnglishWord => {
-            lookup_dict_word(trimmed, naver::Dict::Enko, "en", force, state).await
+            lookup_dict_word(trimmed, naver::Dict::Enko, "en", force, &state).await
         }
         Route::JapaneseWord => {
-            lookup_dict_word(trimmed, naver::Dict::Jako, "ja", force, state).await
+            lookup_dict_word(trimmed, naver::Dict::Jako, "ja", force, &state).await
         }
         // Non-dictionary single word (e.g. Korean): translate into the primary target.
         Route::OtherWord => translate_input(&trimmed, false, &state).await,
@@ -172,6 +172,24 @@ async fn translate_input(
         &cfg.translate_target_alt,
     );
     let definition = google::translate(trimmed, "auto", &tl).await.map_err(err)?;
+
+    // If the translation is a single dictionary word (e.g. 変える -> "change"),
+    // show that word's dictionary entry instead of the bare translation.
+    let translated = definition.trim();
+    if !translated.is_empty() && !lang::is_sentence(translated) {
+        let dict = match route(translated) {
+            Route::EnglishWord => Some((naver::Dict::Enko, "en")),
+            Route::JapaneseWord => Some((naver::Dict::Jako, "ja")),
+            _ => None,
+        };
+        if let Some((d, sl)) = dict {
+            let res = lookup_dict_word(translated.to_string(), d, sl, false, state).await?;
+            if res.kind != "empty" {
+                return Ok(res);
+            }
+        }
+    }
+
     let kind = if lang::is_sentence(trimmed) {
         "sentence"
     } else {
@@ -195,13 +213,13 @@ async fn lookup_dict_word(
     dict: naver::Dict,
     sl: &'static str,
     force: bool,
-    state: State<'_, AppState>,
+    state: &State<'_, AppState>,
 ) -> Result<LookupResult, String> {
     let key = word.to_lowercase();
 
     // 1. Cache lookup — skipped on a forced refresh. Lock is released before any await.
     if !force {
-        let cached = with_db(&state, |conn| db::select_entry(conn, sl, "ko", &key)).map_err(err)?;
+        let cached = with_db(state, |conn| db::select_entry(conn, sl, "ko", &key)).map_err(err)?;
         if let Some(entry) = cached {
             let mode = pron_mode(entry.has_us || entry.has_uk);
             return Ok(LookupResult::new(
@@ -224,7 +242,7 @@ async fn lookup_dict_word(
     //    on the pronunciation downloads.
     let definition = result.definition.clone();
     let key_for_def = key.clone();
-    with_db(&state, move |conn| {
+    with_db(state, move |conn| {
         db::upsert_entry(conn, sl, "ko", &key_for_def, &definition, None)
     })
     .map_err(err)?;
