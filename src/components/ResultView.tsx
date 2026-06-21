@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { LookupResult, LookupSource } from "../lib/api";
+import type { Accent, LookupResult, LookupSource } from "../lib/api";
 import { playPron } from "../lib/audio";
 import { buildColorMap, highlightLine } from "../lib/highlight";
 import "./ResultView.css";
@@ -10,6 +10,26 @@ const SOURCE_LABEL: Record<LookupSource, string> = {
   google: "구글 번역",
   "": "",
 };
+
+interface PronButton {
+  accent: Accent;
+  label: string;
+  title: string;
+}
+
+/** Pronunciation buttons: US/UK for English, female/male (media1/media2) for Japanese. */
+function pronButtons(isJapanese: boolean): ReadonlyArray<PronButton> {
+  if (isJapanese) {
+    return [
+      { accent: "us", label: "여성", title: "여성 발음 듣기" },
+      { accent: "uk", label: "남성", title: "남성 발음 듣기" },
+    ];
+  }
+  return [
+    { accent: "us", label: "미국식", title: "미국식 발음 듣기" },
+    { accent: "uk", label: "영국식", title: "영국식 발음 듣기" },
+  ];
+}
 
 /** Put a blank line between the conjugation line and the first numbered sense. */
 function formatDefinition(text: string): string {
@@ -63,8 +83,10 @@ export function ResultView({ result, loading, onRefresh }: ResultViewProps) {
   }
 
   const isSentence = result.kind === "sentence";
-  // US/UK pronunciation and refresh only apply to English dictionary entries.
+  // Pronunciation and refresh only apply to dictionary entries.
   const isDictEntry = result.source === "naver" || result.source === "cache";
+  // Japanese has no US/UK accent split — media1/media2 hold female/male instead.
+  const prons = pronButtons(result.lang === "ja");
 
   return (
     <article className="result">
@@ -73,28 +95,19 @@ export function ResultView({ result, loading, onRefresh }: ResultViewProps) {
         {!isSentence && <h1 className="result__title">{result.text}</h1>}
         <div className="result__meta">
           <div className="result__actions">
-            {isDictEntry && (
-              <button
-                type="button"
-                className="result__pron"
-                onClick={() => playPron(result.text, "us")}
-                aria-label="미국식 발음 듣기"
-                title="미국식 발음"
-              >
-                🇺🇸 발음
-              </button>
-            )}
-            {isDictEntry && (
-              <button
-                type="button"
-                className="result__pron"
-                onClick={() => playPron(result.text, "uk")}
-                aria-label="영국식 발음 듣기"
-                title="영국식 발음"
-              >
-                🇬🇧 발음
-              </button>
-            )}
+            {isDictEntry &&
+              prons.map((p) => (
+                <button
+                  key={p.accent}
+                  type="button"
+                  className="result__pron"
+                  onClick={() => playPron(result.text, p.accent)}
+                  aria-label={p.title}
+                  title={p.title}
+                >
+                  {p.label}
+                </button>
+              ))}
             {isDictEntry && (
               <button
                 type="button"

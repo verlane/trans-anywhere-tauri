@@ -9,10 +9,15 @@ export interface LookupResult {
   text: string;
   definition: string;
   source: LookupSource;
+  /** Source language of a dictionary entry ("en" / "ja"), empty otherwise. */
+  lang: string;
 }
 
 export interface Settings {
-  defaultAccent: Accent;
+  /** English default pronunciation: "us" (American) / "uk" (British). */
+  defaultAccentEn: Accent;
+  /** Japanese default pronunciation: "us" (female) / "uk" (male). */
+  defaultAccentJa: Accent;
   autoPlay: boolean;
   suggestMinLength: number;
   suggestMaxResults: number;
@@ -22,7 +27,8 @@ export interface Settings {
 }
 
 interface RawSettings {
-  default_accent: Accent;
+  default_accent_en: Accent;
+  default_accent_ja: Accent;
   auto_play: boolean;
   suggest_min_length: number;
   suggest_max_results: number;
@@ -48,7 +54,8 @@ export async function ensurePron(word: string, accent: Accent): Promise<Uint8Arr
 export async function getSettings(): Promise<Settings> {
   const raw = await invoke<RawSettings>("get_settings");
   return {
-    defaultAccent: raw.default_accent,
+    defaultAccentEn: raw.default_accent_en,
+    defaultAccentJa: raw.default_accent_ja,
     autoPlay: raw.auto_play,
     suggestMinLength: raw.suggest_min_length,
     suggestMaxResults: raw.suggest_max_results,
@@ -60,7 +67,8 @@ export async function getSettings(): Promise<Settings> {
 
 export async function saveSettings(settings: Settings): Promise<void> {
   const raw: RawSettings = {
-    default_accent: settings.defaultAccent,
+    default_accent_en: settings.defaultAccentEn,
+    default_accent_ja: settings.defaultAccentJa,
     auto_play: settings.autoPlay,
     suggest_min_length: settings.suggestMinLength,
     suggest_max_results: settings.suggestMaxResults,

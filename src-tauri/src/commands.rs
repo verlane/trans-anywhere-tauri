@@ -34,20 +34,45 @@ pub struct LookupResult {
     pub text: String,
     pub definition: String,
     pub source: String,
+    /// Source language of a dictionary entry ("en" / "ja"), empty otherwise.
+    /// The frontend uses this to label pronunciation buttons (US/UK vs female/male).
+    pub lang: String,
 }
 
 impl LookupResult {
-    fn new(kind: &str, text: String, definition: String, source: &str) -> Self {
+    fn new(kind: &str, text: String, definition: String, source: &str, lang: &str) -> Self {
         Self {
             kind: kind.into(),
             text,
             definition,
             source: source.into(),
+            lang: lang.into(),
         }
     }
 
     fn empty(text: &str) -> Self {
-        Self::new("empty", text.into(), String::new(), "")
+        Self::new("empty", text.into(), String::new(), "", "")
+    }
+}
+
+/// How an input is routed once it has been trimmed and found non-empty.
+#[derive(Debug, PartialEq, Eq)]
+enum Route {
+    Sentence,
+    EnglishWord,
+    JapaneseWord,
+    OtherWord,
+}
+
+/// Decide how to handle a trimmed, non-empty input.
+fn route(text: &str) -> Route {
+    if lang::is_sentence(text) {
+        return Route::Sentence;
+    }
+    match lang::detect(text) {
+        lang::Lang::En => Route::EnglishWord,
+        lang::Lang::Ja => Route::JapaneseWord,
+        _ => Route::OtherWord,
     }
 }
 
@@ -71,39 +96,49 @@ pub async fn lookup(text: String, force: bool, state: State<'_, AppState>) -> Re
         return Ok(LookupResult::empty(&trimmed));
     }
 
-    if lang::is_sentence(&trimmed) {
-        let cfg = settings_snapshot(&state);
-        let tl = if lang::detect(&trimmed) == lang::Lang::Ko {
-            "en".to_string()
-        } else {
-            cfg.target_language
-        };
-        let definition = google::translate(&trimmed, "auto", &tl).await.map_err(err)?;
-        return Ok(LookupResult::new("sentence", trimmed, definition, "google"));
+    match route(&trimmed) {
+        Route::Sentence => {
+            let cfg = settings_snapshot(&state);
+            let tl = if lang::detect(&trimmed) == lang::Lang::Ko {
+                "en".to_string()
+            } else {
+                cfg.target_language
+            };
+            let definition = google::translate(&trimmed, "auto", &tl).await.map_err(err)?;
+            Ok(LookupResult::new("sentence", trimmed, definition, "google", ""))
+        }
+        Route::EnglishWord => lookup_dict_word(trimmed, naver::Dict::Enko, "en", force, state).await,
+        Route::JapaneseWord => lookup_dict_word(trimmed, naver::Dict::Jako, "ja", force, state).await,
+        Route::OtherWord => {
+            // Non-dictionary single word (e.g. Korean): fall back to Google.
+            let definition = google::translate(&trimmed, "auto", "ko").await.map_err(err)?;
+            Ok(LookupResult::new("word", trimmed, definition, "google", ""))
+        }
     }
-
-    if lang::detect(&trimmed) == lang::Lang::En {
-        return lookup_english_word(trimmed, force, state).await;
-    }
-
-    // Non-English single word: fall back to Google for now.
-    let definition = google::translate(&trimmed, "auto", "ko").await.map_err(err)?;
-    Ok(LookupResult::new("word", trimmed, definition, "google"))
 }
 
-async fn lookup_english_word(word: String, force: bool, state: State<'_, AppState>) -> Result<LookupResult, String> {
+/// Look up a single word against a Naver dictionary, caching the definition and
+/// downloading pronunciations in the background. `sl` is the cache source language
+/// ("en" / "ja"); the target is always "ko".
+async fn lookup_dict_word(
+    word: String,
+    dict: naver::Dict,
+    sl: &'static str,
+    force: bool,
+    state: State<'_, AppState>,
+) -> Result<LookupResult, String> {
     let key = word.to_lowercase();
 
     // 1. Cache lookup — skipped on a forced refresh. Lock is released before any await.
     if !force {
-        let cached = with_db(&state, |conn| db::select_entry(conn, "en", "ko", &key)).map_err(err)?;
+        let cached = with_db(&state, |conn| db::select_entry(conn, sl, "ko", &key)).map_err(err)?;
         if let Some(entry) = cached {
-            return Ok(LookupResult::new("word", word, entry.definition, "cache"));
+            return Ok(LookupResult::new("word", word, entry.definition, "cache", sl));
         }
     }
 
     // 2. Naver dictionary (definition only — pronunciations are fetched lazily).
-    let Some(result) = naver::english_to_korean(&word).await.map_err(err)? else {
+    let Some(result) = naver::lookup(&word, dict).await.map_err(err)? else {
         return Ok(LookupResult::empty(&word));
     };
 
@@ -112,39 +147,48 @@ async fn lookup_english_word(word: String, force: bool, state: State<'_, AppStat
     let definition = result.definition.clone();
     let key_for_def = key.clone();
     with_db(&state, move |conn| {
-        db::upsert_entry(conn, "en", "ko", &key_for_def, &definition, None)
+        db::upsert_entry(conn, sl, "ko", &key_for_def, &definition, None)
     })
     .map_err(err)?;
 
-    // 4. Download US (media1) + UK (media2) pronunciations in the background and
+    // 4. Download both pronunciation slots (media1/media2) in the background and
     //    cache them, without blocking the response.
     let us = result.pron_us_url.clone();
     let uk = result.pron_uk_url.clone();
     if us.is_some() || uk.is_some() {
         let db_path = state.db_path.lock().map(|p| p.clone()).unwrap_or_default();
         tokio::spawn(async move {
-            let us_bytes = download_opt(us).await;
-            let uk_bytes = download_opt(uk).await;
+            let us_bytes = download_opt(us, dict).await;
+            let uk_bytes = download_opt(uk, dict).await;
             if us_bytes.is_some() || uk_bytes.is_some() {
                 if let Ok(conn) = db::open(&db_path) {
                     if let Some(b) = us_bytes {
-                        let _ = db::update_pron(&conn, "en", "ko", &key, db::Accent::Us, &b);
+                        let _ = db::update_pron(&conn, sl, "ko", &key, db::Accent::Us, &b);
                     }
                     if let Some(b) = uk_bytes {
-                        let _ = db::update_pron(&conn, "en", "ko", &key, db::Accent::Uk, &b);
+                        let _ = db::update_pron(&conn, sl, "ko", &key, db::Accent::Uk, &b);
                     }
                 }
             }
         });
     }
 
-    Ok(LookupResult::new("word", word, result.definition, "naver"))
+    Ok(LookupResult::new("word", word, result.definition, "naver", sl))
 }
 
-async fn download_opt(url: Option<String>) -> Option<Vec<u8>> {
+async fn download_opt(url: Option<String>, dict: naver::Dict) -> Option<Vec<u8>> {
     match url {
-        Some(u) => naver::download_pron(&u).await.ok().filter(|b| !b.is_empty()),
+        Some(u) => naver::download_pron(&u, dict).await.ok().filter(|b| !b.is_empty()),
         None => None,
+    }
+}
+
+/// Pick the dictionary + cache source language for a word from its script.
+fn dict_for_word(word: &str) -> (naver::Dict, &'static str) {
+    if lang::detect(word) == lang::Lang::Ja {
+        (naver::Dict::Jako, "ja")
+    } else {
+        (naver::Dict::Enko, "en")
     }
 }
 
@@ -154,12 +198,13 @@ async fn download_opt(url: Option<String>) -> Option<Vec<u8>> {
 pub async fn ensure_pron(word: String, accent: String, state: State<'_, AppState>) -> Result<Vec<u8>, String> {
     let key = word.to_lowercase();
     let acc = db::Accent::from_str(&accent).unwrap_or(db::Accent::Us);
+    let (dict, sl) = dict_for_word(&word);
 
-    if let Some(bytes) = with_db(&state, |conn| db::select_pron(conn, "en", "ko", &key, acc)).map_err(err)? {
+    if let Some(bytes) = with_db(&state, |conn| db::select_pron(conn, sl, "ko", &key, acc)).map_err(err)? {
         return Ok(bytes);
     }
 
-    let Some(result) = naver::english_to_korean(&word).await.map_err(err)? else {
+    let Some(result) = naver::lookup(&word, dict).await.map_err(err)? else {
         return Ok(Vec::new());
     };
     let url = match acc {
@@ -170,12 +215,12 @@ pub async fn ensure_pron(word: String, accent: String, state: State<'_, AppState
         return Ok(Vec::new());
     };
 
-    let bytes = naver::download_pron(&url).await.map_err(err)?;
+    let bytes = naver::download_pron(&url, dict).await.map_err(err)?;
     if bytes.is_empty() {
         return Ok(Vec::new());
     }
     let to_store = bytes.clone();
-    with_db(&state, move |conn| db::update_pron(conn, "en", "ko", &key, acc, &to_store)).map_err(err)?;
+    with_db(&state, move |conn| db::update_pron(conn, sl, "ko", &key, acc, &to_store)).map_err(err)?;
     Ok(bytes)
 }
 
@@ -229,4 +274,29 @@ fn with_db<T>(
 
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn routes_multiword_input_to_sentence() {
+        assert!(matches!(route("did you push"), Route::Sentence));
+    }
+
+    #[test]
+    fn routes_english_word_to_english_dict() {
+        assert!(matches!(route("present"), Route::EnglishWord));
+    }
+
+    #[test]
+    fn routes_japanese_word_to_japanese_dict() {
+        assert!(matches!(route("辞書"), Route::JapaneseWord));
+    }
+
+    #[test]
+    fn routes_korean_word_to_other() {
+        assert!(matches!(route("사전"), Route::OtherWord));
+    }
 }

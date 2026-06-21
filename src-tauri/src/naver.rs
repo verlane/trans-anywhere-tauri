@@ -5,10 +5,43 @@
 
 use serde_json::Value;
 
-const REFERER: &str = "https://en.dict.naver.com/";
-const SEARCH: &str = "https://en.dict.naver.com/api3/enko/search";
-const ENTRY: &str = "https://en.dict.naver.com/api/platform/enko/entry";
+/// Which Naver dictionary to query. The two services share the same JSON shape
+/// (entryId -> entry detail) but live on different hosts/paths and differ in how
+/// pronunciations are exposed.
+#[derive(Debug, Clone, Copy)]
+pub enum Dict {
+    /// English -> Korean. Pronunciations are split by accent (US / UK).
+    Enko,
+    /// Japanese -> Korean. No accent split; female / male recordings instead.
+    Jako,
+}
 
+impl Dict {
+    fn referer(self) -> &'static str {
+        match self {
+            Dict::Enko => "https://en.dict.naver.com/",
+            Dict::Jako => "https://ja.dict.naver.com/",
+        }
+    }
+
+    fn search_url(self) -> &'static str {
+        match self {
+            Dict::Enko => "https://en.dict.naver.com/api3/enko/search",
+            Dict::Jako => "https://ja.dict.naver.com/api3/jako/search",
+        }
+    }
+
+    fn entry_url(self) -> &'static str {
+        match self {
+            Dict::Enko => "https://en.dict.naver.com/api/platform/enko/entry",
+            Dict::Jako => "https://ja.dict.naver.com/api/platform/jako/entry",
+        }
+    }
+}
+
+/// A dictionary result. The two pron slots map to DB columns media1/media2.
+/// For Enko: `pron_us_url` = US, `pron_uk_url` = UK.
+/// For Jako: `pron_us_url` = female, `pron_uk_url` = male (no accent concept).
 #[derive(Debug, Clone)]
 pub struct NaverResult {
     pub definition: String,
@@ -16,10 +49,10 @@ pub struct NaverResult {
     pub pron_uk_url: Option<String>,
 }
 
-async fn get_json(url: &str) -> anyhow::Result<Value> {
+async fn get_json(url: &str, referer: &str) -> anyhow::Result<Value> {
     let body = crate::http::CLIENT
         .get(url)
-        .header(reqwest::header::REFERER, REFERER)
+        .header(reqwest::header::REFERER, referer)
         .send()
         .await?
         .text()
@@ -143,10 +176,11 @@ fn build_definition(entry: &Value) -> String {
     out.trim().to_string()
 }
 
-/// Look up an English word and return its Korean definition + pronunciation url.
-pub async fn english_to_korean(word: &str) -> anyhow::Result<Option<NaverResult>> {
-    let search_url = format!("{SEARCH}?range=word&query={}", urlencoding::encode(word));
-    let search = get_json(&search_url).await?;
+/// Look up a word in the given dictionary and return its Korean definition +
+/// pronunciation urls.
+pub async fn lookup(word: &str, dict: Dict) -> anyhow::Result<Option<NaverResult>> {
+    let search_url = format!("{}?range=word&query={}", dict.search_url(), urlencoding::encode(word));
+    let search = get_json(&search_url, dict.referer()).await?;
 
     let entry_id = search
         .pointer("/searchResultMap/searchResultListMap/WORD/items/0/entryId")
@@ -156,8 +190,8 @@ pub async fn english_to_korean(word: &str) -> anyhow::Result<Option<NaverResult>
         return Ok(None);
     };
 
-    let entry_url = format!("{ENTRY}?entryId={entry_id}");
-    let detail = get_json(&entry_url).await?;
+    let entry_url = format!("{}?entryId={entry_id}", dict.entry_url());
+    let detail = get_json(&entry_url, dict.referer()).await?;
     let entry = detail.get("entry").unwrap_or(&Value::Null);
 
     let definition = build_definition(entry);
@@ -165,7 +199,7 @@ pub async fn english_to_korean(word: &str) -> anyhow::Result<Option<NaverResult>
         return Ok(None);
     }
 
-    let (pron_us_url, pron_uk_url) = extract_pron_urls(entry);
+    let (pron_us_url, pron_uk_url) = extract_pron_urls(entry, dict);
 
     Ok(Some(NaverResult {
         definition,
@@ -182,9 +216,16 @@ fn pron_file(p: &Value) -> Option<String> {
         .map(String::from)
 }
 
-/// Pull the first US and UK pronunciation urls. Naver tags US audio as "A" or
-/// "C" (general American) depending on the word, and UK audio as "E".
-fn extract_pron_urls(entry: &Value) -> (Option<String>, Option<String>) {
+/// Pull the two pronunciation urls into (slot1, slot2), which map to DB media1/media2.
+fn extract_pron_urls(entry: &Value, dict: Dict) -> (Option<String>, Option<String>) {
+    match dict {
+        Dict::Enko => extract_pron_urls_enko(entry),
+        Dict::Jako => extract_pron_urls_jako(entry),
+    }
+}
+
+/// Enko: Naver tags US audio as "A" or "C" (general American) and UK audio as "E".
+fn extract_pron_urls_enko(entry: &Value) -> (Option<String>, Option<String>) {
     let mut us = None;
     let mut uk = None;
     if let Some(prons) = entry.pointer("/members/0/prons").and_then(Value::as_array) {
@@ -199,11 +240,24 @@ fn extract_pron_urls(entry: &Value) -> (Option<String>, Option<String>) {
     (us, uk)
 }
 
-/// Download a pronunciation MP3 by url.
-pub async fn download_pron(url: &str) -> anyhow::Result<Vec<u8>> {
+/// Jako: a single prons entry carries both recordings. Female -> slot1 (media1),
+/// male -> slot2 (media2).
+fn extract_pron_urls_jako(entry: &Value) -> (Option<String>, Option<String>) {
+    let pron = entry.pointer("/members/0/prons/0");
+    let pick = |key: &str| {
+        pron.and_then(|p| p.get(key))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+    };
+    (pick("female_pron_file"), pick("male_pron_file"))
+}
+
+/// Download a pronunciation MP3 by url, using the dictionary's referer.
+pub async fn download_pron(url: &str, dict: Dict) -> anyhow::Result<Vec<u8>> {
     let bytes = crate::http::CLIENT
         .get(url)
-        .header(reqwest::header::REFERER, REFERER)
+        .header(reqwest::header::REFERER, dict.referer())
         .send()
         .await?
         .bytes()
@@ -221,6 +275,56 @@ mod tests {
         assert_eq!(clean("  spaced  "), "spaced");
         // A bare "<" that is not a tag should survive.
         assert_eq!(clean("a < b"), "a < b");
+    }
+
+    #[test]
+    fn enko_splits_prons_by_accent_type() {
+        let entry = serde_json::json!({
+            "members": [{ "prons": [
+                { "pron_type": "A", "female_pron_file": "https://dict.example/us.mp3" },
+                { "pron_type": "E", "male_pron_file": "https://dict.example/uk.mp3" }
+            ]}]
+        });
+        let (us, uk) = extract_pron_urls(&entry, Dict::Enko);
+        assert_eq!(us.as_deref(), Some("https://dict.example/us.mp3"));
+        assert_eq!(uk.as_deref(), Some("https://dict.example/uk.mp3"));
+    }
+
+    #[test]
+    fn jako_uses_female_as_primary_and_male_as_secondary() {
+        // 일한사전은 미/영 액센트 구분이 없고 여성/남성 발음만 제공한다.
+        // 여성 -> 첫 번째 슬롯(media1), 남성 -> 두 번째 슬롯(media2)으로 매핑한다.
+        let entry = serde_json::json!({
+            "members": [{ "prons": [{
+                "pron_type": "none",
+                "pron_symbol": serde_json::Value::Null,
+                "female_pron_file": "https://dict.example/f.mp3",
+                "male_pron_file": "https://dict.example/m.mp3"
+            }]}]
+        });
+        let (primary, secondary) = extract_pron_urls(&entry, Dict::Jako);
+        assert_eq!(primary.as_deref(), Some("https://dict.example/f.mp3"));
+        assert_eq!(secondary.as_deref(), Some("https://dict.example/m.mp3"));
+    }
+
+    #[test]
+    fn jako_build_definition_extracts_meaning_and_example() {
+        let entry = serde_json::json!({
+            "primary_mean": "사서|||사전",
+            "members": [{ "show_full_name": "じしょ" }],
+            "means": [{
+                "origin_mean": "사서(辭書); 사전.",
+                "examples": [{
+                    "origin_example": "辞書を引く",
+                    "translations": [{ "origin_translation": "사전을 찾다" }]
+                }]
+            }]
+        });
+        let def = build_definition(&entry);
+        assert!(def.contains("사서, 사전"));
+        assert!(def.contains("じしょ"));
+        assert!(def.contains("1. 사서(辭書); 사전."));
+        assert!(def.contains("辞書を引く"));
     }
 
     #[test]

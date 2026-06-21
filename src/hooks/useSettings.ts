@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { getSettings, saveSettings, type Settings } from "../lib/api";
 
 const FALLBACK: Settings = {
-  defaultAccent: "us",
+  defaultAccentEn: "us",
+  defaultAccentJa: "us",
   autoPlay: false,
   suggestMinLength: 2,
   suggestMaxResults: 20,

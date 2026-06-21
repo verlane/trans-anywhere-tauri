@@ -5,9 +5,12 @@ use std::path::Path;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Settings {
-    /// Default pronunciation accent: "us" or "uk".
+    /// Default English pronunciation slot: "us" (American) or "uk" (British).
     #[serde(default = "default_accent")]
-    pub default_accent: String,
+    pub default_accent_en: String,
+    /// Default Japanese pronunciation slot: "us" (female) or "uk" (male).
+    #[serde(default = "default_accent")]
+    pub default_accent_ja: String,
     /// Play pronunciation automatically after a lookup.
     #[serde(default)]
     pub auto_play: bool,
@@ -48,7 +51,8 @@ fn default_target_language() -> String {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            default_accent: default_accent(),
+            default_accent_en: default_accent(),
+            default_accent_ja: default_accent(),
             auto_play: false,
             suggest_min_length: default_min_length(),
             suggest_max_results: default_max_results(),
@@ -81,7 +85,8 @@ mod tests {
     #[test]
     fn missing_file_yields_defaults() {
         let s = load(Path::new("does-not-exist.json"));
-        assert_eq!(s.default_accent, "us");
+        assert_eq!(s.default_accent_en, "us");
+        assert_eq!(s.default_accent_ja, "us");
         assert_eq!(s.suggest_max_results, 20);
         assert!(!s.auto_play);
     }
@@ -90,14 +95,18 @@ mod tests {
     fn save_then_load_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
-        let mut s = Settings::default();
-        s.default_accent = "uk".into();
-        s.auto_play = true;
-        s.suggest_min_length = 3;
+        let s = Settings {
+            default_accent_en: "uk".into(),
+            default_accent_ja: "uk".into(),
+            auto_play: true,
+            suggest_min_length: 3,
+            ..Default::default()
+        };
         save(&path, &s).unwrap();
 
         let loaded = load(&path);
-        assert_eq!(loaded.default_accent, "uk");
+        assert_eq!(loaded.default_accent_en, "uk");
+        assert_eq!(loaded.default_accent_ja, "uk");
         assert!(loaded.auto_play);
         assert_eq!(loaded.suggest_min_length, 3);
     }
@@ -109,7 +118,8 @@ mod tests {
         std::fs::write(&path, r#"{ "auto_play": true }"#).unwrap();
         let s = load(&path);
         assert!(s.auto_play);
-        assert_eq!(s.default_accent, "us");
+        assert_eq!(s.default_accent_en, "us");
+        assert_eq!(s.default_accent_ja, "us");
         assert_eq!(s.suggest_max_results, 20);
     }
 }

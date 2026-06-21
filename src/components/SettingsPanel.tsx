@@ -14,10 +14,45 @@ const LANGUAGES: ReadonlyArray<[string, string]> = [
   ["ja", "日本語"],
 ];
 
-const ACCENTS: ReadonlyArray<[Accent, string]> = [
-  ["us", "🇺🇸 미국식"],
-  ["uk", "🇬🇧 영국식"],
+// us -> slot1 (media1), uk -> slot2 (media2). Labels differ per dictionary.
+const EN_ACCENTS: ReadonlyArray<[Accent, string]> = [
+  ["us", "미국식"],
+  ["uk", "영국식"],
 ];
+
+const JA_ACCENTS: ReadonlyArray<[Accent, string]> = [
+  ["us", "여성"],
+  ["uk", "남성"],
+];
+
+interface AccentRowProps {
+  label: string;
+  options: ReadonlyArray<[Accent, string]>;
+  value: Accent;
+  onSelect: (accent: Accent) => void;
+}
+
+function AccentRow({ label, options, value, onSelect }: AccentRowProps) {
+  return (
+    <div className="settings__row">
+      <span className="settings__label">{label}</span>
+      <div className="settings__segment">
+        {options.map(([accent, optionLabel]) => (
+          <button
+            key={accent}
+            type="button"
+            className={
+              value === accent ? "settings__seg settings__seg--active" : "settings__seg"
+            }
+            onClick={() => onSelect(accent)}
+          >
+            {optionLabel}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function clampInt(value: string, min: number, max: number, fallback: number): number {
   const n = parseInt(value, 10);
@@ -66,25 +101,19 @@ export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps)
           </button>
         </header>
 
-        <div className="settings__row">
-          <span className="settings__label">기본 발음</span>
-          <div className="settings__segment">
-            {ACCENTS.map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={
-                  settings.defaultAccent === value
-                    ? "settings__seg settings__seg--active"
-                    : "settings__seg"
-                }
-                onClick={() => update({ defaultAccent: value })}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <AccentRow
+          label="영어 기본 발음"
+          options={EN_ACCENTS}
+          value={settings.defaultAccentEn}
+          onSelect={(accent) => update({ defaultAccentEn: accent })}
+        />
+
+        <AccentRow
+          label="일본어 기본 발음"
+          options={JA_ACCENTS}
+          value={settings.defaultAccentJa}
+          onSelect={(accent) => update({ defaultAccentJa: accent })}
+        />
 
         <label className="settings__row">
           <span className="settings__label">발음 자동재생</span>

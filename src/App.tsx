@@ -19,6 +19,7 @@ const EMPTY_RESULT = (text: string): LookupResult => ({
   text,
   definition: "",
   source: "",
+  lang: "",
 });
 
 function App() {
@@ -73,7 +74,8 @@ function App() {
     if (res.kind !== "word" || !settings.autoPlay) {
       return;
     }
-    playPron(res.text, settings.defaultAccent);
+    const accent = res.lang === "ja" ? settings.defaultAccentJa : settings.defaultAccentEn;
+    playPron(res.text, accent);
   }
 
   async function runLookup(text: string, force = false) {
