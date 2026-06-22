@@ -47,11 +47,30 @@
   background: transparent;
   border: none;
   border-bottom: 2px solid var(--color-line);
-  padding: var(--space-2) 0;
+  padding: var(--space-2) var(--space-5) var(--space-2) 0;
   outline: none;
   resize: none;
   overflow-y: auto;
   transition: border-color var(--duration) var(--ease);
+}
+
+.app__clear {
+  position: absolute;
+  top: var(--space-2);
+  right: 0;
+  font-size: 0.9rem;
+  line-height: 1;
+  color: var(--color-ink-faint);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-1);
+  border-radius: 99px;
+  transition: color var(--duration) var(--ease);
+}
+
+.app__clear:hover {
+  color: var(--color-ink);
 }
 
 .app__input::placeholder {

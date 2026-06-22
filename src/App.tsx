@@ -9,6 +9,7 @@ import { useTheme } from "./hooks/useTheme";
 import { useHistory } from "./hooks/useHistory";
 import { SuggestList } from "./components/SuggestList";
 import { ResultView } from "./components/ResultView";
+import { RecentChips } from "./components/RecentChips";
 import { SettingsPanel } from "./components/SettingsPanel";
 import "./App.css";
 
@@ -273,6 +274,21 @@ function App() {
             onFocus={() => setFocused(true)}
             onBlur={() => setTimeout(() => setFocused(false), 120)}
           />
+          {query && (
+            <button
+              type="button"
+              className="app__clear"
+              onClick={() => {
+                setQuery("");
+                setDismissed(false);
+                inputRef.current?.focus();
+              }}
+              aria-label="입력 지우기"
+              title="지우기"
+            >
+              ✕
+            </button>
+          )}
           {showSuggest && (
             <SuggestList items={suggestions} activeIndex={activeIndex} onPick={pickWord} />
           )}
@@ -299,17 +315,29 @@ function App() {
           ⚙
         </button>
       </div>
-      <ResultView
-        result={result}
-        loading={loading}
-        onRefresh={() => result && runLookup(result.text, true)}
-        onWordClick={(word) => {
-          setQuery(word);
-          setDismissed(true);
-          runLookup(word);
-        }}
-        scrollRef={resultRef}
-      />
+      {query.trim() === "" && !loading && history.items.length > 0 ? (
+        <RecentChips
+          items={history.items}
+          onPick={(term) => {
+            setQuery(term);
+            setDismissed(true);
+            runLookup(term);
+          }}
+          onRemove={history.remove}
+        />
+      ) : (
+        <ResultView
+          result={result}
+          loading={loading}
+          onRefresh={() => result && runLookup(result.text, true)}
+          onWordClick={(word) => {
+            setQuery(word);
+            setDismissed(true);
+            runLookup(word);
+          }}
+          scrollRef={resultRef}
+        />
+      )}
       {showSettings && (
         <SettingsPanel settings={settings} update={update} onClose={() => setShowSettings(false)} />
       )}
