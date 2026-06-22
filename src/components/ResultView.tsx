@@ -1,7 +1,7 @@
 import { useState, type ReactNode, type Ref } from "react";
 import type { Accent, LookupResult, LookupSource } from "../lib/api";
 import { playPron, speakTts } from "../lib/audio";
-import { buildColorMap, renderLine, hasRuby } from "../lib/highlight";
+import { buildColorMap, renderLine, hasRuby, type WordClick } from "../lib/highlight";
 import "./ResultView.css";
 
 const SOURCE_LABEL: Record<LookupSource, string> = {
@@ -40,7 +40,11 @@ function formatDefinition(text: string): string {
 const SENSE_LINE = /^\d+\.\s/;
 
 /** Render the definition line by line, emphasizing numbered sense headings. */
-function renderDefinition(definition: string, keyword: string): ReactNode {
+function renderDefinition(
+  definition: string,
+  keyword: string,
+  onWordClick?: WordClick,
+): ReactNode {
   const text = formatDefinition(definition);
   const colors = buildColorMap(text, keyword);
   return text.split("\n").map((line, i) => {
@@ -59,7 +63,7 @@ function renderDefinition(definition: string, keyword: string): ReactNode {
     }
     return (
       <div key={i} className={cls}>
-        {renderLine(line, colors)}
+        {renderLine(line, colors, onWordClick)}
       </div>
     );
   });
@@ -69,11 +73,13 @@ interface ResultViewProps {
   result: LookupResult | null;
   loading: boolean;
   onRefresh: () => void;
+  /** Look up a clicked English word from within the definition. */
+  onWordClick?: WordClick;
   /** Ref to the scrollable result container (for keyboard scrolling). */
   scrollRef?: Ref<HTMLElement>;
 }
 
-export function ResultView({ result, loading, onRefresh, scrollRef }: ResultViewProps) {
+export function ResultView({ result, loading, onRefresh, onWordClick, scrollRef }: ResultViewProps) {
   const [copied, setCopied] = useState(false);
 
   function copyDefinition() {
@@ -171,7 +177,9 @@ export function ResultView({ result, loading, onRefresh, scrollRef }: ResultView
       {isSentence ? (
         <p className="result__body">{result.definition}</p>
       ) : (
-        <div className="result__body">{renderDefinition(result.definition, result.text)}</div>
+        <div className="result__body">
+          {renderDefinition(result.definition, result.text, onWordClick)}
+        </div>
       )}
     </article>
   );

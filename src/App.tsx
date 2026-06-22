@@ -303,6 +303,11 @@ function App() {
         result={result}
         loading={loading}
         onRefresh={() => result && runLookup(result.text, true)}
+        onWordClick={(word) => {
+          setQuery(word);
+          setDismissed(true);
+          runLookup(word);
+        }}
         scrollRef={resultRef}
       />
       {showSettings && (

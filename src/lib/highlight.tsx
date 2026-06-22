@@ -120,12 +120,32 @@ function computeSpans(text: string, colors: Map<string, string>): Span[] {
   return out;
 }
 
+/** Callback fired when a clickable English word in a definition is clicked. */
+export type WordClick = (word: string) => void;
+
+/** Render plain text, wrapping English words as click-to-look-up spans. */
+function renderText(text: string, onWordClick: WordClick | undefined, nextKey: () => number): ReactNode[] {
+  if (!onWordClick) {
+    return [text];
+  }
+  return splitWords(text).map((tok) =>
+    tok.isWord ? (
+      <span key={nextKey()} className="word" onClick={() => onWordClick(tok.text)}>
+        {tok.text}
+      </span>
+    ) : (
+      tok.text
+    ),
+  );
+}
+
 /** Color one text segment (at absolute `base`) using the precomputed spans. */
 function colorSegment(
   text: string,
   base: number,
   spans: Span[],
   nextKey: () => number,
+  onWordClick?: WordClick,
 ): ReactNode[] {
   const out: ReactNode[] = [];
   let pos = 0;
@@ -136,17 +156,22 @@ function colorSegment(
       continue;
     }
     if (start > pos) {
-      out.push(text.slice(pos, start));
+      out.push(...renderText(text.slice(pos, start), onWordClick, nextKey));
     }
+    const word = text.slice(start, end);
     out.push(
-      <span key={nextKey()} className={`hl hl--${span.cls}`}>
-        {text.slice(start, end)}
+      <span
+        key={nextKey()}
+        className={onWordClick ? `hl hl--${span.cls} word` : `hl hl--${span.cls}`}
+        onClick={onWordClick ? () => onWordClick(word) : undefined}
+      >
+        {word}
       </span>,
     );
     pos = end;
   }
   if (pos < text.length) {
-    out.push(text.slice(pos));
+    out.push(...renderText(text.slice(pos), onWordClick, nextKey));
   }
   return out;
 }
@@ -156,7 +181,11 @@ function colorSegment(
  * and color keyword/conjugation matches — computed over the furigana-stripped
  * text so highlights aren't broken up by the readings.
  */
-export function renderLine(line: string, colors: Map<string, string>): ReactNode[] {
+export function renderLine(
+  line: string,
+  colors: Map<string, string>,
+  onWordClick?: WordClick,
+): ReactNode[] {
   const segments: Array<{ text: string; ruby?: string }> = [];
   let last = 0;
   let m: RegExpExecArray | null;
@@ -180,7 +209,7 @@ export function renderLine(line: string, colors: Map<string, string>): ReactNode
   const nextKey = () => key++;
   let offset = 0;
   for (const seg of segments) {
-    const colored = colorSegment(seg.text, offset, spans, nextKey);
+    const colored = colorSegment(seg.text, offset, spans, nextKey, onWordClick);
     if (seg.ruby) {
       nodes.push(
         <ruby key={nextKey()}>

@@ -131,6 +131,16 @@
   font-size: var(--text-body);
 }
 
+/* English words in a definition are click-to-look-up. */
+.word {
+  cursor: pointer;
+}
+.word:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* Sentence translations keep their raw line breaks. */
 p.result__body {
   white-space: pre-wrap;
