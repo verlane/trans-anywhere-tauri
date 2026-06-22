@@ -21,13 +21,13 @@ interface PronButton {
 function pronButtons(isJapanese: boolean): ReadonlyArray<PronButton> {
   if (isJapanese) {
     return [
-      { accent: "us", label: "여성", title: "여성 발음 듣기" },
-      { accent: "uk", label: "남성", title: "남성 발음 듣기" },
+      { accent: "us", label: "여", title: "여성 발음 듣기" },
+      { accent: "uk", label: "남", title: "남성 발음 듣기" },
     ];
   }
   return [
-    { accent: "us", label: "미국식", title: "미국식 발음 듣기" },
-    { accent: "uk", label: "영국식", title: "영국식 발음 듣기" },
+    { accent: "us", label: "US", title: "미국식 발음 듣기" },
+    { accent: "uk", label: "UK", title: "영국식 발음 듣기" },
   ];
 }
 
@@ -137,7 +137,7 @@ export function ResultView({ result, loading, onRefresh, scrollRef }: ResultView
                 aria-label="TTS 발음 듣기"
                 title="TTS 발음 듣기"
               >
-                TTS 발음
+                TTS
               </button>
             )}
             <button
