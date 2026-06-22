@@ -140,17 +140,6 @@ export function ResultView({ result, loading, onRefresh, scrollRef }: ResultView
                 TTS 발음
               </button>
             )}
-            {isDictEntry && (
-              <button
-                type="button"
-                className="result__refresh"
-                onClick={onRefresh}
-                aria-label="네이버에서 새로고침"
-                title="네이버에서 새로고침"
-              >
-                ↻
-              </button>
-            )}
             <button
               type="button"
               className="result__copy"
@@ -161,7 +150,22 @@ export function ResultView({ result, loading, onRefresh, scrollRef }: ResultView
               {copied ? "복사됨" : "복사"}
             </button>
           </div>
-          {result.source && <span className="result__badge">{SOURCE_LABEL[result.source]}</span>}
+          {result.source && (
+            <div className="result__source">
+              <span className="result__badge">{SOURCE_LABEL[result.source]}</span>
+              {isDictEntry && (
+                <button
+                  type="button"
+                  className="result__refresh"
+                  onClick={onRefresh}
+                  aria-label="네이버에서 새로고침"
+                  title="네이버에서 새로고침"
+                >
+                  ↻
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </header>
       {isSentence ? (

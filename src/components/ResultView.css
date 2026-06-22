@@ -105,6 +105,12 @@
   border-color: var(--color-accent);
 }
 
+.result__source {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 .result__badge {
   font-size: 0.68rem;
   letter-spacing: 0.03em;
