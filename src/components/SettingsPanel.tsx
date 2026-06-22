@@ -37,6 +37,7 @@ const LIMITS = {
   suggestMinLength: { min: 2, max: 10, default: 2 },
   suggestMaxResults: { min: 5, max: 50, default: 20 },
   pronVolume: { min: 0, max: 100 },
+  textScale: { min: 80, max: 140 },
 } as const;
 
 interface SegmentRowProps<T extends string> {
@@ -215,6 +216,22 @@ export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps)
               onChange={(e) => update({ pronVolume: Number(e.target.value) })}
             />
             <span className="settings__slider-value">{settings.pronVolume}%</span>
+          </div>
+        </label>
+
+        <label className="settings__row">
+          <span className="settings__label">본문 글자 크기</span>
+          <div className="settings__slider-box">
+            <input
+              type="range"
+              className="settings__slider"
+              min={LIMITS.textScale.min}
+              max={LIMITS.textScale.max}
+              step={5}
+              value={settings.textScale}
+              onChange={(e) => update({ textScale: Number(e.target.value) })}
+            />
+            <span className="settings__slider-value">{settings.textScale}%</span>
           </div>
         </label>
 

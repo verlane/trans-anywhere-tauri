@@ -16,6 +16,7 @@ const FALLBACK: Settings = {
   hotkey: "Alt+W",
   pronVolume: 100,
   theme: "system",
+  textScale: 100,
 };
 
 interface UseSettings {

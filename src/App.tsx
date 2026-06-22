@@ -65,6 +65,10 @@ function App() {
     setPronVolume(settings.pronVolume);
   }, [settings.pronVolume]);
 
+  useEffect(() => {
+    document.documentElement.style.setProperty("--reading-scale", String(settings.textScale / 100));
+  }, [settings.textScale]);
+
   // Auto-grow the textarea to fit its content, capped at half the window height.
   useEffect(() => {
     const el = inputRef.current;

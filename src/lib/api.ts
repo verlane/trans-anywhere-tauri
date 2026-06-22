@@ -40,6 +40,8 @@ export interface Settings {
   pronVolume: number;
   /** Color theme: light, dark, or follow the OS. */
   theme: ThemeMode;
+  /** Definition body text scale as a percentage (80-140). */
+  textScale: number;
 }
 
 interface RawSettings {
@@ -57,6 +59,7 @@ interface RawSettings {
   hotkey: string;
   pron_volume: number;
   theme: string;
+  text_scale: number;
 }
 
 export async function suggest(query: string): Promise<string[]> {
@@ -91,6 +94,7 @@ export async function getSettings(): Promise<Settings> {
     hotkey: raw.hotkey,
     pronVolume: raw.pron_volume,
     theme: raw.theme as ThemeMode,
+    textScale: raw.text_scale,
   };
 }
 
@@ -110,6 +114,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
     hotkey: settings.hotkey,
     pron_volume: settings.pronVolume,
     theme: settings.theme,
+    text_scale: settings.textScale,
   };
   await invoke("save_settings", { settings: raw });
 }

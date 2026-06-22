@@ -47,6 +47,9 @@ pub struct Settings {
     /// Color theme: "light", "dark", or "system" (follow the OS).
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// Definition body text scale as a percentage (80-140).
+    #[serde(default = "default_text_scale")]
+    pub text_scale: usize,
 }
 
 // Bounds for the numeric settings; `sanitize` clamps loaded values into these
@@ -57,6 +60,8 @@ const MAX_SUGGEST_LENGTH: usize = 10;
 const MIN_SUGGEST_RESULTS: usize = 5;
 const MAX_SUGGEST_RESULTS: usize = 50;
 const MAX_PRON_VOLUME: usize = 100;
+const MIN_TEXT_SCALE: usize = 80;
+const MAX_TEXT_SCALE: usize = 140;
 
 fn default_hotkey() -> String {
     "Alt+W".into()
@@ -86,6 +91,9 @@ fn default_pron_volume() -> usize {
 fn default_theme() -> String {
     "system".into()
 }
+fn default_text_scale() -> usize {
+    100
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -104,6 +112,7 @@ impl Default for Settings {
             hotkey: default_hotkey(),
             pron_volume: default_pron_volume(),
             theme: default_theme(),
+            text_scale: default_text_scale(),
         }
     }
 }
@@ -121,6 +130,7 @@ fn sanitize(mut s: Settings) -> Settings {
     if !matches!(s.theme.as_str(), "light" | "dark" | "system") {
         s.theme = default_theme();
     }
+    s.text_scale = s.text_scale.clamp(MIN_TEXT_SCALE, MAX_TEXT_SCALE);
     s
 }
 
@@ -158,6 +168,7 @@ mod tests {
         assert!(!s.always_on_top);
         assert_eq!(s.pron_volume, 100);
         assert_eq!(s.theme, "system");
+        assert_eq!(s.text_scale, 100);
     }
 
     #[test]
@@ -199,13 +210,14 @@ mod tests {
         let path = dir.path().join("settings.json");
         std::fs::write(
             &path,
-            r#"{ "suggest_min_length": 0, "suggest_max_results": 999, "pron_volume": 300 }"#,
+            r#"{ "suggest_min_length": 0, "suggest_max_results": 999, "pron_volume": 300, "text_scale": 5 }"#,
         )
         .unwrap();
         let s = load(&path);
         assert_eq!(s.suggest_min_length, 2);
         assert_eq!(s.suggest_max_results, 50);
         assert_eq!(s.pron_volume, 100);
+        assert_eq!(s.text_scale, 80);
     }
 
     #[test]

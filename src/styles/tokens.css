@@ -21,9 +21,11 @@
   --font-body: "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: "Cascadia Code", "Consolas", ui-monospace, monospace;
 
+  /* Reading scale: user-adjustable multiplier for definition body text. */
+  --reading-scale: 1;
   --text-word: clamp(1.9rem, 1.4rem + 2.2vw, 2.6rem);
   --text-section: 0.72rem;
-  --text-body: 0.98rem;
+  --text-body: calc(0.98rem * var(--reading-scale));
   --text-small: 0.82rem;
 
   --space-1: 0.25rem;
