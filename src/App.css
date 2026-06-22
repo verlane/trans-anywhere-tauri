@@ -36,6 +36,24 @@
   transform: rotate(45deg);
 }
 
+.app__bookmark {
+  flex: none;
+  font-size: 1.05rem;
+  line-height: 1;
+  color: var(--color-ink-faint);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-2);
+  border-radius: 99px;
+  transition: color var(--duration) var(--ease), transform var(--duration) var(--ease);
+}
+
+.app__bookmark:hover {
+  color: var(--color-accent);
+  transform: scale(1.1);
+}
+
 .app__input {
   width: 100%;
   display: block;

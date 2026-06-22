@@ -75,11 +75,23 @@ interface ResultViewProps {
   onRefresh: () => void;
   /** Look up a clicked English word from within the definition. */
   onWordClick?: WordClick;
+  /** Whether the current term is saved in the word book. */
+  isFavorite?: boolean;
+  /** Toggle the current term in the word book. */
+  onToggleFavorite?: () => void;
   /** Ref to the scrollable result container (for keyboard scrolling). */
   scrollRef?: Ref<HTMLElement>;
 }
 
-export function ResultView({ result, loading, onRefresh, onWordClick, scrollRef }: ResultViewProps) {
+export function ResultView({
+  result,
+  loading,
+  onRefresh,
+  onWordClick,
+  isFavorite,
+  onToggleFavorite,
+  scrollRef,
+}: ResultViewProps) {
   const [copied, setCopied] = useState(false);
 
   function copyDefinition() {
@@ -144,6 +156,17 @@ export function ResultView({ result, loading, onRefresh, onWordClick, scrollRef 
                 title="TTS 발음 듣기"
               >
                 TTS
+              </button>
+            )}
+            {onToggleFavorite && (
+              <button
+                type="button"
+                className={isFavorite ? "result__fav result__fav--on" : "result__fav"}
+                onClick={onToggleFavorite}
+                aria-label={isFavorite ? "단어장에서 빼기" : "단어장에 저장"}
+                title={isFavorite ? "단어장에서 빼기" : "단어장에 저장"}
+              >
+                {isFavorite ? "★" : "☆"}
               </button>
             )}
             <button

@@ -10,6 +10,8 @@ import { useHistory } from "./hooks/useHistory";
 import { SuggestList } from "./components/SuggestList";
 import { ResultView } from "./components/ResultView";
 import { RecentChips } from "./components/RecentChips";
+import { FavoritesPanel } from "./components/FavoritesPanel";
+import { useFavorites } from "./hooks/useFavorites";
 import { SettingsPanel } from "./components/SettingsPanel";
 import "./App.css";
 
@@ -34,6 +36,8 @@ function App() {
   const { settings, update } = useSettings();
   useTheme(settings.theme);
   const history = useHistory();
+  const favorites = useFavorites();
+  const [showFavorites, setShowFavorites] = useState(false);
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
   const [result, setResult] = useState<LookupResult | null>(null);
@@ -311,6 +315,15 @@ function App() {
         </div>
         <button
           type="button"
+          className="app__bookmark"
+          onClick={() => setShowFavorites(true)}
+          aria-label="단어장 열기"
+          title="단어장"
+        >
+          ★
+        </button>
+        <button
+          type="button"
           className="app__gear"
           onClick={() => setShowSettings(true)}
           aria-label="설정 열기"
@@ -339,7 +352,22 @@ function App() {
             setDismissed(true);
             runLookup(word);
           }}
+          isFavorite={!!result && favorites.has(result.text)}
+          onToggleFavorite={result ? () => favorites.toggle(result.text) : undefined}
           scrollRef={resultRef}
+        />
+      )}
+      {showFavorites && (
+        <FavoritesPanel
+          items={favorites.items}
+          onPick={(term) => {
+            setShowFavorites(false);
+            setQuery(term);
+            setDismissed(true);
+            runLookup(term);
+          }}
+          onRemove={(term) => favorites.toggle(term)}
+          onClose={() => setShowFavorites(false)}
         />
       )}
       {showSettings && (
