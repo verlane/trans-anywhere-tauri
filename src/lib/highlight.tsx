@@ -1,5 +1,41 @@
 import type { ReactNode } from "react";
 
+/** A run of a definition line: a clickable English word, or an untouched gap. */
+export interface WordToken {
+  text: string;
+  isWord: boolean;
+}
+
+/**
+ * One clickable English word: ASCII letters with inner apostrophes/hyphens,
+ * not adjacent to a non-ASCII letter — so IPA runs like "ˈɪndɪ" aren't split
+ * into bogus "nd" words.
+ */
+const WORD_RE = /(?<![^\x00-\x7F])[A-Za-z]+(?:['-][A-Za-z]+)*(?![^\x00-\x7F])/g;
+
+/**
+ * Split a line into clickable English-word tokens and the gaps between them.
+ * Korean, punctuation, digits, and IPA (non-ASCII) stay as non-word gaps so
+ * only real English words become look-up-on-click targets.
+ */
+export function splitWords(text: string): WordToken[] {
+  const tokens: WordToken[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  WORD_RE.lastIndex = 0;
+  while ((m = WORD_RE.exec(text)) !== null) {
+    if (m.index > last) {
+      tokens.push({ text: text.slice(last, m.index), isWord: false });
+    }
+    tokens.push({ text: m[0], isWord: true });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) {
+    tokens.push({ text: text.slice(last), isWord: false });
+  }
+  return tokens;
+}
+
 /** Matches the "past - pastParticiple - presentParticiple" line in a definition. */
 const CONJ = /([a-z']+) - ([a-z']+) - ([a-z']+)/i;
 
