@@ -44,6 +44,9 @@ pub struct Settings {
     /// Pronunciation playback volume as a percentage (0-100).
     #[serde(default = "default_pron_volume")]
     pub pron_volume: usize,
+    /// Color theme: "light", "dark", or "system" (follow the OS).
+    #[serde(default = "default_theme")]
+    pub theme: String,
 }
 
 // Bounds for the numeric settings; `sanitize` clamps loaded values into these
@@ -80,6 +83,9 @@ fn default_toggle_hotkey() -> String {
 fn default_pron_volume() -> usize {
     MAX_PRON_VOLUME
 }
+fn default_theme() -> String {
+    "system".into()
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -97,6 +103,7 @@ impl Default for Settings {
             db_path: String::new(),
             hotkey: default_hotkey(),
             pron_volume: default_pron_volume(),
+            theme: default_theme(),
         }
     }
 }
@@ -111,6 +118,9 @@ fn sanitize(mut s: Settings) -> Settings {
         .suggest_max_results
         .clamp(MIN_SUGGEST_RESULTS, MAX_SUGGEST_RESULTS);
     s.pron_volume = s.pron_volume.min(MAX_PRON_VOLUME);
+    if !matches!(s.theme.as_str(), "light" | "dark" | "system") {
+        s.theme = default_theme();
+    }
     s
 }
 
@@ -147,6 +157,7 @@ mod tests {
         assert!(!s.minimize_to_tray);
         assert!(!s.always_on_top);
         assert_eq!(s.pron_volume, 100);
+        assert_eq!(s.theme, "system");
     }
 
     #[test]
@@ -195,5 +206,16 @@ mod tests {
         assert_eq!(s.suggest_min_length, 2);
         assert_eq!(s.suggest_max_results, 50);
         assert_eq!(s.pron_volume, 100);
+    }
+
+    #[test]
+    fn load_resets_invalid_theme() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{ "theme": "rainbow" }"#).unwrap();
+        assert_eq!(load(&path).theme, "system");
+
+        std::fs::write(&path, r#"{ "theme": "dark" }"#).unwrap();
+        assert_eq!(load(&path).theme, "dark");
     }
 }

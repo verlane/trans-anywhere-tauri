@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 export type LookupKind = "word" | "sentence" | "empty";
 export type LookupSource = "cache" | "naver" | "google" | "";
 export type Accent = "us" | "uk";
+export type ThemeMode = "light" | "dark" | "system";
 
 export type PronMode = "recorded" | "tts" | "";
 
@@ -37,6 +38,8 @@ export interface Settings {
   hotkey: string;
   /** Pronunciation playback volume as a percentage (0-100). */
   pronVolume: number;
+  /** Color theme: light, dark, or follow the OS. */
+  theme: ThemeMode;
 }
 
 interface RawSettings {
@@ -53,6 +56,7 @@ interface RawSettings {
   db_path: string;
   hotkey: string;
   pron_volume: number;
+  theme: string;
 }
 
 export async function suggest(query: string): Promise<string[]> {
@@ -86,6 +90,7 @@ export async function getSettings(): Promise<Settings> {
     dbPath: raw.db_path,
     hotkey: raw.hotkey,
     pronVolume: raw.pron_volume,
+    theme: raw.theme as ThemeMode,
   };
 }
 
@@ -104,6 +109,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
     db_path: settings.dbPath,
     hotkey: settings.hotkey,
     pron_volume: settings.pronVolume,
+    theme: settings.theme,
   };
   await invoke("save_settings", { settings: raw });
 }

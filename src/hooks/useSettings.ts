@@ -15,6 +15,7 @@ const FALLBACK: Settings = {
   dbPath: "",
   hotkey: "Alt+W",
   pronVolume: 100,
+  theme: "system",
 };
 
 interface UseSettings {

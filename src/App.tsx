@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { lookup, type LookupResult } from "./lib/api";
 import { matchHotkey } from "./lib/hotkey";
-import { playPron, speakTts } from "./lib/audio";
+import { playPron, speakTts, setPronVolume } from "./lib/audio";
 import { useSuggest } from "./hooks/useSuggest";
 import { useSettings } from "./hooks/useSettings";
+import { useTheme } from "./hooks/useTheme";
 import { useHistory } from "./hooks/useHistory";
 import { SuggestList } from "./components/SuggestList";
 import { ResultView } from "./components/ResultView";
@@ -30,6 +31,7 @@ const EMPTY_RESULT = (text: string): LookupResult => ({
 
 function App() {
   const { settings, update } = useSettings();
+  useTheme(settings.theme);
   const history = useHistory();
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
@@ -57,6 +59,10 @@ function App() {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    setPronVolume(settings.pronVolume);
+  }, [settings.pronVolume]);
 
   // Auto-grow the textarea to fit its content, capped at half the window height.
   useEffect(() => {

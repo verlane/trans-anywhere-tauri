@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import type { Accent, Settings } from "../lib/api";
+import type { Accent, Settings, ThemeMode } from "../lib/api";
 import { captureHotkey, prettyHotkey } from "../lib/hotkey";
 import "./SettingsPanel.css";
 
@@ -26,6 +26,12 @@ const JA_ACCENTS: ReadonlyArray<[Accent, string]> = [
   ["uk", "남성"],
 ];
 
+const THEMES: ReadonlyArray<[ThemeMode, string]> = [
+  ["light", "라이트"],
+  ["dark", "다크"],
+  ["system", "시스템"],
+];
+
 // Bounds for the numeric settings. Kept in sync with `sanitize` in settings.rs.
 const LIMITS = {
   suggestMinLength: { min: 2, max: 10, default: 2 },
@@ -33,26 +39,26 @@ const LIMITS = {
   pronVolume: { min: 0, max: 100 },
 } as const;
 
-interface AccentRowProps {
+interface SegmentRowProps<T extends string> {
   label: string;
-  options: ReadonlyArray<[Accent, string]>;
-  value: Accent;
-  onSelect: (accent: Accent) => void;
+  options: ReadonlyArray<[T, string]>;
+  value: T;
+  onSelect: (value: T) => void;
 }
 
-function AccentRow({ label, options, value, onSelect }: AccentRowProps) {
+function SegmentRow<T extends string>({ label, options, value, onSelect }: SegmentRowProps<T>) {
   return (
     <div className="settings__row">
       <span className="settings__label">{label}</span>
       <div className="settings__segment">
-        {options.map(([accent, optionLabel]) => (
+        {options.map(([optionValue, optionLabel]) => (
           <button
-            key={accent}
+            key={optionValue}
             type="button"
             className={
-              value === accent ? "settings__seg settings__seg--active" : "settings__seg"
+              value === optionValue ? "settings__seg settings__seg--active" : "settings__seg"
             }
-            onClick={() => onSelect(accent)}
+            onClick={() => onSelect(optionValue)}
           >
             {optionLabel}
           </button>
@@ -146,14 +152,21 @@ export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps)
           </button>
         </header>
 
-        <AccentRow
+        <SegmentRow
+          label="테마"
+          options={THEMES}
+          value={settings.theme}
+          onSelect={(theme) => update({ theme })}
+        />
+
+        <SegmentRow
           label="영어 기본 발음"
           options={EN_ACCENTS}
           value={settings.defaultAccentEn}
           onSelect={(accent) => update({ defaultAccentEn: accent })}
         />
 
-        <AccentRow
+        <SegmentRow
           label="일본어 기본 발음"
           options={JA_ACCENTS}
           value={settings.defaultAccentJa}

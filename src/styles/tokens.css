@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light;
   /* Warm editorial paper palette — deliberately not stock gray-on-white. */
   --color-paper: oklch(98.2% 0.008 85);
   --color-paper-raised: oklch(99.5% 0.006 85);
@@ -36,4 +37,27 @@
   --shadow-pop: 0 12px 32px -8px oklch(24% 0.02 270 / 0.22);
   --duration: 160ms;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Dark theme: only the palette flips — every component reads these vars,
+   so no component CSS changes. Inks/papers swap lightness; accents and the
+   highlight palette gain lightness to keep contrast on the dark paper. */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --color-paper: oklch(21% 0.014 270);
+  --color-paper-raised: oklch(25% 0.016 270);
+  --color-ink: oklch(91% 0.012 85);
+  --color-ink-soft: oklch(72% 0.014 270);
+  --color-ink-faint: oklch(54% 0.015 270);
+  --color-accent: oklch(72% 0.13 255);
+  --color-accent-soft: oklch(34% 0.06 255);
+  --color-line: oklch(33% 0.012 270);
+  --color-danger: oklch(64% 0.17 25);
+
+  --hl-kw: oklch(68% 0.18 15);
+  --hl-past: oklch(70% 0.14 255);
+  --hl-pp: oklch(72% 0.15 55);
+  --hl-ing: oklch(68% 0.14 150);
+
+  --shadow-pop: 0 12px 32px -8px oklch(0% 0 0 / 0.5);
 }
