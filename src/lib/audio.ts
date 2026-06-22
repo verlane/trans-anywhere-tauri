@@ -2,6 +2,13 @@ import { ensurePron, type Accent } from "./api";
 
 let audioCtx: AudioContext | null = null;
 let currentSource: AudioBufferSourceNode | null = null;
+/** Playback gain (0.0-1.0). Updated from settings via `setPronVolume`. */
+let pronVolume = 1;
+
+/** Set the pronunciation playback volume from a 0-100 percentage. */
+export function setPronVolume(percent: number): void {
+  pronVolume = Math.min(1, Math.max(0, percent / 100));
+}
 
 /**
  * Find where the actual sound starts, in seconds. Naver's recordings (especially
@@ -39,7 +46,10 @@ export async function playPron(word: string, accent: Accent): Promise<void> {
     }
     const source = audioCtx.createBufferSource();
     source.buffer = buffer;
-    source.connect(audioCtx.destination);
+    const gain = audioCtx.createGain();
+    gain.gain.value = pronVolume;
+    source.connect(gain);
+    gain.connect(audioCtx.destination);
     source.start(0, soundStart(buffer));
     currentSource = source;
   } catch {
@@ -56,5 +66,6 @@ export function speakTts(text: string, lang: string): void {
   synth.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = lang === "ja" ? "ja-JP" : lang === "en" ? "en-US" : lang || "en-US";
+  utterance.volume = pronVolume;
   synth.speak(utterance);
 }

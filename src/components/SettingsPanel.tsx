@@ -26,6 +26,13 @@ const JA_ACCENTS: ReadonlyArray<[Accent, string]> = [
   ["uk", "남성"],
 ];
 
+// Bounds for the numeric settings. Kept in sync with `sanitize` in settings.rs.
+const LIMITS = {
+  suggestMinLength: { min: 2, max: 10, default: 2 },
+  suggestMaxResults: { min: 5, max: 50, default: 20 },
+  pronVolume: { min: 0, max: 100 },
+} as const;
+
 interface AccentRowProps {
   label: string;
   options: ReadonlyArray<[Accent, string]>;
@@ -184,14 +191,38 @@ export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps)
         </label>
 
         <label className="settings__row">
+          <span className="settings__label">발음 볼륨</span>
+          <div className="settings__slider-box">
+            <input
+              type="range"
+              className="settings__slider"
+              min={LIMITS.pronVolume.min}
+              max={LIMITS.pronVolume.max}
+              value={settings.pronVolume}
+              onChange={(e) => update({ pronVolume: Number(e.target.value) })}
+            />
+            <span className="settings__slider-value">{settings.pronVolume}%</span>
+          </div>
+        </label>
+
+        <label className="settings__row">
           <span className="settings__label">자동완성 최소 글자수</span>
           <input
             type="number"
             className="settings__number"
-            min={1}
-            max={10}
+            min={LIMITS.suggestMinLength.min}
+            max={LIMITS.suggestMinLength.max}
             value={settings.suggestMinLength}
-            onChange={(e) => update({ suggestMinLength: clampInt(e.target.value, 1, 10, 2) })}
+            onChange={(e) =>
+              update({
+                suggestMinLength: clampInt(
+                  e.target.value,
+                  LIMITS.suggestMinLength.min,
+                  LIMITS.suggestMinLength.max,
+                  LIMITS.suggestMinLength.default,
+                ),
+              })
+            }
           />
         </label>
 
@@ -200,10 +231,19 @@ export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps)
           <input
             type="number"
             className="settings__number"
-            min={1}
-            max={50}
+            min={LIMITS.suggestMaxResults.min}
+            max={LIMITS.suggestMaxResults.max}
             value={settings.suggestMaxResults}
-            onChange={(e) => update({ suggestMaxResults: clampInt(e.target.value, 1, 50, 20) })}
+            onChange={(e) =>
+              update({
+                suggestMaxResults: clampInt(
+                  e.target.value,
+                  LIMITS.suggestMaxResults.min,
+                  LIMITS.suggestMaxResults.max,
+                  LIMITS.suggestMaxResults.default,
+                ),
+              })
+            }
           />
         </label>
 

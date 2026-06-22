@@ -41,7 +41,19 @@ pub struct Settings {
     /// Global shortcut to show the window, e.g. "Alt+W". Empty disables it.
     #[serde(default = "default_hotkey")]
     pub hotkey: String,
+    /// Pronunciation playback volume as a percentage (0-100).
+    #[serde(default = "default_pron_volume")]
+    pub pron_volume: usize,
 }
+
+// Bounds for the numeric settings; `sanitize` clamps loaded values into these
+// ranges so a hand-edited or legacy settings.json can't feed out-of-range data
+// into the UI or audio layer.
+const MIN_SUGGEST_LENGTH: usize = 2;
+const MAX_SUGGEST_LENGTH: usize = 10;
+const MIN_SUGGEST_RESULTS: usize = 5;
+const MAX_SUGGEST_RESULTS: usize = 50;
+const MAX_PRON_VOLUME: usize = 100;
 
 fn default_hotkey() -> String {
     "Alt+W".into()
@@ -65,6 +77,9 @@ fn default_translate_target_alt() -> String {
 fn default_toggle_hotkey() -> String {
     "Shift+Enter".into()
 }
+fn default_pron_volume() -> usize {
+    MAX_PRON_VOLUME
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -81,16 +96,31 @@ impl Default for Settings {
             always_on_top: false,
             db_path: String::new(),
             hotkey: default_hotkey(),
+            pron_volume: default_pron_volume(),
         }
     }
 }
 
+/// Clamp the numeric fields into their valid ranges. Guards against hand-edited
+/// or legacy settings files carrying out-of-range values.
+fn sanitize(mut s: Settings) -> Settings {
+    s.suggest_min_length = s
+        .suggest_min_length
+        .clamp(MIN_SUGGEST_LENGTH, MAX_SUGGEST_LENGTH);
+    s.suggest_max_results = s
+        .suggest_max_results
+        .clamp(MIN_SUGGEST_RESULTS, MAX_SUGGEST_RESULTS);
+    s.pron_volume = s.pron_volume.min(MAX_PRON_VOLUME);
+    s
+}
+
 /// Load settings from disk, falling back to defaults on a missing or invalid file.
 pub fn load(path: &Path) -> Settings {
-    std::fs::read_to_string(path)
+    let settings = std::fs::read_to_string(path)
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    sanitize(settings)
 }
 
 /// Persist settings as pretty JSON.
@@ -116,6 +146,7 @@ mod tests {
         assert_eq!(s.toggle_hotkey, "Shift+Enter");
         assert!(!s.minimize_to_tray);
         assert!(!s.always_on_top);
+        assert_eq!(s.pron_volume, 100);
     }
 
     #[test]
@@ -148,5 +179,21 @@ mod tests {
         assert_eq!(s.default_accent_en, "us");
         assert_eq!(s.default_accent_ja, "us");
         assert_eq!(s.suggest_max_results, 20);
+        assert_eq!(s.pron_volume, 100);
+    }
+
+    #[test]
+    fn load_clamps_out_of_range_numbers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{ "suggest_min_length": 0, "suggest_max_results": 999, "pron_volume": 300 }"#,
+        )
+        .unwrap();
+        let s = load(&path);
+        assert_eq!(s.suggest_min_length, 2);
+        assert_eq!(s.suggest_max_results, 50);
+        assert_eq!(s.pron_volume, 100);
     }
 }

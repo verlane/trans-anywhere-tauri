@@ -35,6 +35,8 @@ export interface Settings {
   alwaysOnTop: boolean;
   dbPath: string;
   hotkey: string;
+  /** Pronunciation playback volume as a percentage (0-100). */
+  pronVolume: number;
 }
 
 interface RawSettings {
@@ -50,6 +52,7 @@ interface RawSettings {
   always_on_top: boolean;
   db_path: string;
   hotkey: string;
+  pron_volume: number;
 }
 
 export async function suggest(query: string): Promise<string[]> {
@@ -82,6 +85,7 @@ export async function getSettings(): Promise<Settings> {
     alwaysOnTop: raw.always_on_top,
     dbPath: raw.db_path,
     hotkey: raw.hotkey,
+    pronVolume: raw.pron_volume,
   };
 }
 
@@ -99,6 +103,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
     always_on_top: settings.alwaysOnTop,
     db_path: settings.dbPath,
     hotkey: settings.hotkey,
+    pron_volume: settings.pronVolume,
   };
   await invoke("save_settings", { settings: raw });
 }

@@ -14,6 +14,7 @@ const FALLBACK: Settings = {
   alwaysOnTop: false,
   dbPath: "",
   hotkey: "Alt+W",
+  pronVolume: 100,
 };
 
 interface UseSettings {
