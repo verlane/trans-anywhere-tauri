@@ -129,8 +129,6 @@ export function ResultView({
   return (
     <article className="result" ref={scrollRef}>
       <header className="result__head">
-        {/* Sentences already show the source text in the input; don't repeat it. */}
-        {!isSentence && <h1 className="result__title">{result.text}</h1>}
         <div className="result__meta">
           <div className="result__actions">
             {isDictEntry &&
@@ -196,6 +194,8 @@ export function ResultView({
             </div>
           )}
         </div>
+        {/* Sentences already show the source text in the input; don't repeat it. */}
+        {!isSentence && <h1 className="result__title">{result.text}</h1>}
       </header>
       {isSentence ? (
         <p className="result__body">{result.definition}</p>
