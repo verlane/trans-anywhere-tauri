@@ -14,6 +14,7 @@ import { FavoritesPanel } from "./components/FavoritesPanel";
 import { WordTooltip } from "./components/WordTooltip";
 import { useFavorites } from "./hooks/useFavorites";
 import { useWordPreview } from "./hooks/useWordPreview";
+import { useNavStack } from "./hooks/useNavStack";
 import { SettingsPanel } from "./components/SettingsPanel";
 import "./App.css";
 
@@ -40,6 +41,7 @@ function App() {
   const history = useHistory();
   const favorites = useFavorites();
   const wordPreview = useWordPreview(settings.hoverPreview);
+  const nav = useNavStack();
   const [showFavorites, setShowFavorites] = useState(false);
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
@@ -126,7 +128,7 @@ function App() {
     playPron(res.text, accent);
   }
 
-  async function runLookup(text: string, force = false, alt = false) {
+  async function runLookup(text: string, force = false, alt = false, fromNav = false) {
     const trimmed = text.trim();
     if (!trimmed) {
       return;
@@ -139,6 +141,10 @@ function App() {
       autoPlay(res);
       if (res.kind !== "empty") {
         history.add(trimmed);
+        // Back/forward moves replay an existing entry — don't re-push them.
+        if (!fromNav) {
+          nav.push(trimmed);
+        }
       }
     } catch {
       setResult(EMPTY_RESULT(trimmed));
@@ -147,6 +153,33 @@ function App() {
     }
   }
   runLookupRef.current = runLookup;
+
+  function navTo(term: string | null) {
+    if (term === null) {
+      return;
+    }
+    wordPreview.onLeave();
+    setQuery(term);
+    setDismissed(true);
+    runLookup(term, false, false, true);
+  }
+  const navBack = () => navTo(nav.goBack());
+  const navForward = () => navTo(nav.goForward());
+
+  useEffect(() => {
+    function onMouseUp(e: MouseEvent) {
+      // Mouse side buttons: 3 = back, 4 = forward.
+      if (e.button === 3) {
+        e.preventDefault();
+        navBack();
+      } else if (e.button === 4) {
+        e.preventDefault();
+        navForward();
+      }
+    }
+    window.addEventListener("mouseup", onMouseUp);
+    return () => window.removeEventListener("mouseup", onMouseUp);
+  }, [navBack, navForward]);
 
   function pickWord(word: string) {
     setQuery(word);
@@ -233,6 +266,17 @@ function App() {
       runLookup(query, false, true);
       return;
     }
+    // Back/forward through visited searches (e.code → layout/IME-independent).
+    if (e.altKey && e.code === "KeyH") {
+      e.preventDefault();
+      navBack();
+      return;
+    }
+    if (e.altKey && e.code === "KeyL") {
+      e.preventDefault();
+      navForward();
+      return;
+    }
     if (handleResultScroll(e)) {
       return;
     }
@@ -267,6 +311,26 @@ function App() {
   return (
     <div className="app">
       <div className="app__bar">
+        <button
+          type="button"
+          className="app__nav"
+          disabled={!nav.canBack}
+          onClick={navBack}
+          aria-label="이전 검색"
+          title="이전 (Alt+H)"
+        >
+          ‹
+        </button>
+        <button
+          type="button"
+          className="app__nav"
+          disabled={!nav.canForward}
+          onClick={navForward}
+          aria-label="다음 검색"
+          title="다음 (Alt+L)"
+        >
+          ›
+        </button>
         <div className="app__search">
           <textarea
             ref={inputRef}
