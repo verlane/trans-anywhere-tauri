@@ -17,6 +17,7 @@ const FALLBACK: Settings = {
   pronVolume: 100,
   theme: "system",
   textScale: 100,
+  hoverPreview: true,
 };
 
 interface UseSettings {

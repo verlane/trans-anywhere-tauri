@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 /** A run of a definition line: a clickable English word, or an untouched gap. */
 export interface WordToken {
@@ -123,14 +123,32 @@ function computeSpans(text: string, colors: Map<string, string>): Span[] {
 /** Callback fired when a clickable English word in a definition is clicked. */
 export type WordClick = (word: string) => void;
 
-/** Render plain text, wrapping English words as click-to-look-up spans. */
-function renderText(text: string, onWordClick: WordClick | undefined, nextKey: () => number): ReactNode[] {
-  if (!onWordClick) {
+/** Click/hover handlers attached to clickable English words in a definition. */
+export interface WordHandlers {
+  onClick?: WordClick;
+  onHover?: (word: string, anchor: DOMRect) => void;
+  onLeave?: () => void;
+}
+
+/** DOM event props for a clickable word span (look-up on click, preview on hover). */
+function wordProps(word: string, handlers: WordHandlers) {
+  return {
+    onClick: handlers.onClick ? () => handlers.onClick?.(word) : undefined,
+    onMouseEnter: handlers.onHover
+      ? (e: MouseEvent<HTMLSpanElement>) => handlers.onHover?.(word, e.currentTarget.getBoundingClientRect())
+      : undefined,
+    onMouseLeave: handlers.onLeave,
+  };
+}
+
+/** Render plain text, wrapping English words as click/hover spans. */
+function renderText(text: string, handlers: WordHandlers | undefined, nextKey: () => number): ReactNode[] {
+  if (!handlers) {
     return [text];
   }
   return splitWords(text).map((tok) =>
     tok.isWord ? (
-      <span key={nextKey()} className="word" onClick={() => onWordClick(tok.text)}>
+      <span key={nextKey()} className="word" {...wordProps(tok.text, handlers)}>
         {tok.text}
       </span>
     ) : (
@@ -145,7 +163,7 @@ function colorSegment(
   base: number,
   spans: Span[],
   nextKey: () => number,
-  onWordClick?: WordClick,
+  handlers?: WordHandlers,
 ): ReactNode[] {
   const out: ReactNode[] = [];
   let pos = 0;
@@ -156,14 +174,14 @@ function colorSegment(
       continue;
     }
     if (start > pos) {
-      out.push(...renderText(text.slice(pos, start), onWordClick, nextKey));
+      out.push(...renderText(text.slice(pos, start), handlers, nextKey));
     }
     const word = text.slice(start, end);
     out.push(
       <span
         key={nextKey()}
-        className={onWordClick ? `hl hl--${span.cls} word` : `hl hl--${span.cls}`}
-        onClick={onWordClick ? () => onWordClick(word) : undefined}
+        className={handlers ? `hl hl--${span.cls} word` : `hl hl--${span.cls}`}
+        {...(handlers ? wordProps(word, handlers) : {})}
       >
         {word}
       </span>,
@@ -171,7 +189,7 @@ function colorSegment(
     pos = end;
   }
   if (pos < text.length) {
-    out.push(...renderText(text.slice(pos), onWordClick, nextKey));
+    out.push(...renderText(text.slice(pos), handlers, nextKey));
   }
   return out;
 }
@@ -184,7 +202,7 @@ function colorSegment(
 export function renderLine(
   line: string,
   colors: Map<string, string>,
-  onWordClick?: WordClick,
+  handlers?: WordHandlers,
 ): ReactNode[] {
   const segments: Array<{ text: string; ruby?: string }> = [];
   let last = 0;
@@ -209,7 +227,7 @@ export function renderLine(
   const nextKey = () => key++;
   let offset = 0;
   for (const seg of segments) {
-    const colored = colorSegment(seg.text, offset, spans, nextKey, onWordClick);
+    const colored = colorSegment(seg.text, offset, spans, nextKey, handlers);
     if (seg.ruby) {
       nodes.push(
         <ruby key={nextKey()}>

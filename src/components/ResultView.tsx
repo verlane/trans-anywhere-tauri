@@ -1,7 +1,7 @@
 import { useState, type ReactNode, type Ref } from "react";
 import type { Accent, LookupResult, LookupSource } from "../lib/api";
 import { playPron, speakTts } from "../lib/audio";
-import { buildColorMap, renderLine, hasRuby, type WordClick } from "../lib/highlight";
+import { buildColorMap, renderLine, hasRuby, type WordClick, type WordHandlers } from "../lib/highlight";
 import "./ResultView.css";
 
 const SOURCE_LABEL: Record<LookupSource, string> = {
@@ -43,7 +43,7 @@ const SENSE_LINE = /^\d+\.\s/;
 function renderDefinition(
   definition: string,
   keyword: string,
-  onWordClick?: WordClick,
+  handlers?: WordHandlers,
 ): ReactNode {
   const text = formatDefinition(definition);
   const colors = buildColorMap(text, keyword);
@@ -63,7 +63,7 @@ function renderDefinition(
     }
     return (
       <div key={i} className={cls}>
-        {renderLine(line, colors, onWordClick)}
+        {renderLine(line, colors, handlers)}
       </div>
     );
   });
@@ -75,6 +75,10 @@ interface ResultViewProps {
   onRefresh: () => void;
   /** Look up a clicked English word from within the definition. */
   onWordClick?: WordClick;
+  /** Preview a hovered English word (enter with its anchor rect). */
+  onWordHover?: (word: string, anchor: DOMRect) => void;
+  /** Dismiss the hover preview. */
+  onWordLeave?: () => void;
   /** Whether the current term is saved in the word book. */
   isFavorite?: boolean;
   /** Toggle the current term in the word book. */
@@ -88,6 +92,8 @@ export function ResultView({
   loading,
   onRefresh,
   onWordClick,
+  onWordHover,
+  onWordLeave,
   isFavorite,
   onToggleFavorite,
   scrollRef,
@@ -201,7 +207,11 @@ export function ResultView({
         <p className="result__body">{result.definition}</p>
       ) : (
         <div className="result__body">
-          {renderDefinition(result.definition, result.text, onWordClick)}
+          {renderDefinition(result.definition, result.text, {
+            onClick: onWordClick,
+            onHover: onWordHover,
+            onLeave: onWordLeave,
+          })}
         </div>
       )}
     </article>

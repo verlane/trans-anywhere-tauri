@@ -185,6 +185,16 @@ export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps)
         </label>
 
         <label className="settings__row">
+          <span className="settings__label">단어 미리보기 (마우스 오버)</span>
+          <input
+            type="checkbox"
+            className="settings__check"
+            checked={settings.hoverPreview}
+            onChange={(e) => update({ hoverPreview: e.target.checked })}
+          />
+        </label>
+
+        <label className="settings__row">
           <span className="settings__label">항상 위에 표시</span>
           <input
             type="checkbox"

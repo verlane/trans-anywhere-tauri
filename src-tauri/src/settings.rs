@@ -50,6 +50,9 @@ pub struct Settings {
     /// Definition body text scale as a percentage (80-140).
     #[serde(default = "default_text_scale")]
     pub text_scale: usize,
+    /// Show a summary-gloss tooltip when hovering an English word in a definition.
+    #[serde(default = "default_true")]
+    pub hover_preview: bool,
 }
 
 // Bounds for the numeric settings; `sanitize` clamps loaded values into these
@@ -94,6 +97,9 @@ fn default_theme() -> String {
 fn default_text_scale() -> usize {
     100
 }
+fn default_true() -> bool {
+    true
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -113,6 +119,7 @@ impl Default for Settings {
             pron_volume: default_pron_volume(),
             theme: default_theme(),
             text_scale: default_text_scale(),
+            hover_preview: true,
         }
     }
 }
@@ -169,6 +176,7 @@ mod tests {
         assert_eq!(s.pron_volume, 100);
         assert_eq!(s.theme, "system");
         assert_eq!(s.text_scale, 100);
+        assert!(s.hover_preview);
     }
 
     #[test]

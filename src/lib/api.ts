@@ -42,6 +42,8 @@ export interface Settings {
   theme: ThemeMode;
   /** Definition body text scale as a percentage (80-140). */
   textScale: number;
+  /** Show a summary-gloss tooltip on hovering an English word in a definition. */
+  hoverPreview: boolean;
 }
 
 interface RawSettings {
@@ -60,6 +62,7 @@ interface RawSettings {
   pron_volume: number;
   theme: string;
   text_scale: number;
+  hover_preview: boolean;
 }
 
 export async function suggest(query: string): Promise<string[]> {
@@ -95,6 +98,7 @@ export async function getSettings(): Promise<Settings> {
     pronVolume: raw.pron_volume,
     theme: raw.theme as ThemeMode,
     textScale: raw.text_scale,
+    hoverPreview: raw.hover_preview,
   };
 }
 
@@ -115,6 +119,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
     pron_volume: settings.pronVolume,
     theme: settings.theme,
     text_scale: settings.textScale,
+    hover_preview: settings.hoverPreview,
   };
   await invoke("save_settings", { settings: raw });
 }

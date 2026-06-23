@@ -11,7 +11,9 @@ import { SuggestList } from "./components/SuggestList";
 import { ResultView } from "./components/ResultView";
 import { RecentChips } from "./components/RecentChips";
 import { FavoritesPanel } from "./components/FavoritesPanel";
+import { WordTooltip } from "./components/WordTooltip";
 import { useFavorites } from "./hooks/useFavorites";
+import { useWordPreview } from "./hooks/useWordPreview";
 import { SettingsPanel } from "./components/SettingsPanel";
 import "./App.css";
 
@@ -37,6 +39,7 @@ function App() {
   useTheme(settings.theme);
   const history = useHistory();
   const favorites = useFavorites();
+  const wordPreview = useWordPreview(settings.hoverPreview);
   const [showFavorites, setShowFavorites] = useState(false);
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
@@ -348,15 +351,19 @@ function App() {
           loading={loading}
           onRefresh={() => result && runLookup(result.text, true)}
           onWordClick={(word) => {
+            wordPreview.onLeave();
             setQuery(word);
             setDismissed(true);
             runLookup(word);
           }}
+          onWordHover={wordPreview.onEnter}
+          onWordLeave={wordPreview.onLeave}
           isFavorite={!!result && favorites.has(result.text)}
           onToggleFavorite={result ? () => favorites.toggle(result.text) : undefined}
           scrollRef={resultRef}
         />
       )}
+      {wordPreview.preview && <WordTooltip preview={wordPreview.preview} />}
       {showFavorites && (
         <FavoritesPanel
           items={favorites.items}
