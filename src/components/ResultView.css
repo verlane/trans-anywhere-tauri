@@ -92,6 +92,26 @@
   transform: rotate(90deg);
 }
 
+.result__nav {
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--color-ink-faint);
+  background: transparent;
+  border: none;
+  border-radius: 99px;
+  width: 1.4rem;
+  height: 1.4rem;
+  cursor: pointer;
+  transition: color var(--duration) var(--ease);
+}
+.result__nav:hover:not(:disabled) {
+  color: var(--color-accent);
+}
+.result__nav:disabled {
+  color: var(--color-line);
+  cursor: default;
+}
+
 .result__fav {
   font-size: 0.95rem;
   line-height: 1;

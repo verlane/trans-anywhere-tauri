@@ -311,26 +311,6 @@ function App() {
   return (
     <div className="app">
       <div className="app__bar">
-        <button
-          type="button"
-          className="app__nav"
-          disabled={!nav.canBack}
-          onClick={navBack}
-          aria-label="이전 검색"
-          title="이전 (Alt+H)"
-        >
-          ‹
-        </button>
-        <button
-          type="button"
-          className="app__nav"
-          disabled={!nav.canForward}
-          onClick={navForward}
-          aria-label="다음 검색"
-          title="다음 (Alt+L)"
-        >
-          ›
-        </button>
         <div className="app__search">
           <textarea
             ref={inputRef}
@@ -424,6 +404,10 @@ function App() {
           onWordLeave={wordPreview.onLeave}
           isFavorite={!!result && favorites.has(result.text)}
           onToggleFavorite={result ? () => favorites.toggle(result.text) : undefined}
+          canNavBack={nav.canBack}
+          canNavForward={nav.canForward}
+          onNavBack={navBack}
+          onNavForward={navForward}
           scrollRef={resultRef}
         />
       )}

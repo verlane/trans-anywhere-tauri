@@ -13,28 +13,6 @@
   flex: none;
 }
 
-.app__nav {
-  flex: none;
-  font-size: 1.3rem;
-  line-height: 1;
-  color: var(--color-ink-faint);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: var(--space-1) var(--space-2);
-  border-radius: 99px;
-  transition: color var(--duration) var(--ease);
-}
-
-.app__nav:hover:not(:disabled) {
-  color: var(--color-accent);
-}
-
-.app__nav:disabled {
-  color: var(--color-line);
-  cursor: default;
-}
-
 .app__search {
   position: relative;
   flex: 1;

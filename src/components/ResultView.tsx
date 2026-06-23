@@ -83,6 +83,11 @@ interface ResultViewProps {
   isFavorite?: boolean;
   /** Toggle the current term in the word book. */
   onToggleFavorite?: () => void;
+  /** Back/forward navigation through visited searches. */
+  canNavBack?: boolean;
+  canNavForward?: boolean;
+  onNavBack?: () => void;
+  onNavForward?: () => void;
   /** Ref to the scrollable result container (for keyboard scrolling). */
   scrollRef?: Ref<HTMLElement>;
 }
@@ -96,6 +101,10 @@ export function ResultView({
   onWordLeave,
   isFavorite,
   onToggleFavorite,
+  canNavBack,
+  canNavForward,
+  onNavBack,
+  onNavForward,
   scrollRef,
 }: ResultViewProps) {
   const [copied, setCopied] = useState(false);
@@ -137,6 +146,30 @@ export function ResultView({
       <header className="result__head">
         <div className="result__meta">
           <div className="result__actions">
+            {onNavBack && (
+              <button
+                type="button"
+                className="result__nav"
+                disabled={!canNavBack}
+                onClick={onNavBack}
+                aria-label="이전 검색"
+                title="이전 (Alt+H)"
+              >
+                ‹
+              </button>
+            )}
+            {onNavForward && (
+              <button
+                type="button"
+                className="result__nav"
+                disabled={!canNavForward}
+                onClick={onNavForward}
+                aria-label="다음 검색"
+                title="다음 (Alt+L)"
+              >
+                ›
+              </button>
+            )}
             {isDictEntry &&
               result.pronMode === "recorded" &&
               prons.map((p) => (
