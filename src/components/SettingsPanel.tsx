@@ -342,6 +342,7 @@ export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps)
                 ["Enter", "검색 / 번역"],
                 ["Ctrl+Enter", "입력창 줄바꿈"],
                 ["Alt+J / Alt+K", "결과 설명 아래 / 위로 스크롤"],
+                ["Alt+H / Alt+L", "이전 / 다음 검색 (마우스 옆 버튼도 가능)"],
                 ["↑ ↓ / Del", "히스토리 이동 / 삭제"],
                 ["Esc / ↓", "히스토리 닫기 / 다시 열기"],
               ] as ReadonlyArray<[string, string]>
