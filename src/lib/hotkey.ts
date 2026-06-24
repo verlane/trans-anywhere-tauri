@@ -28,21 +28,22 @@ export function prettyHotkey(hotkey: string): string {
   return hotkey.replace(/Control/g, "Ctrl").replace(/Super/g, "Win");
 }
 
-/** Does a keydown match an accelerator string like "Control+Shift+Enter"? */
-export function matchHotkey(e: KeyboardEvent, hotkey: string): boolean {
-  if (!hotkey) {
-    return false;
-  }
-  const parts = hotkey.split("+");
-  const key = parts[parts.length - 1];
-  if (
-    e.ctrlKey !== parts.includes("Control") ||
-    e.altKey !== parts.includes("Alt") ||
-    e.shiftKey !== parts.includes("Shift") ||
-    e.metaKey !== parts.includes("Super")
-  ) {
-    return false;
-  }
-  const pressed = e.key.length === 1 ? e.key.toUpperCase() : e.key;
-  return pressed === key;
+/**
+ * Fixed in-app textarea key bindings. Labels and matchers live together so the
+ * help text in the settings panel can never drift from the actual behavior.
+ */
+export const EDITOR_KEY = {
+  search: "Enter",
+  translateAlt: "Ctrl+Enter",
+  newline: "Shift+Enter",
+} as const;
+
+/** Ctrl+Enter (or Cmd+Enter) — translate into the secondary target language. */
+export function isTranslateAltKey(e: KeyboardEvent): boolean {
+  return e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey;
+}
+
+/** Shift+Enter — insert a newline instead of running the search. */
+export function isNewlineKey(e: KeyboardEvent): boolean {
+  return e.key === "Enter" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey;
 }

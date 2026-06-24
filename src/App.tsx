@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { lookup, type LookupResult } from "./lib/api";
-import { matchHotkey } from "./lib/hotkey";
+import { isTranslateAltKey, isNewlineKey } from "./lib/hotkey";
 import { playPron, speakTts, setPronVolume } from "./lib/audio";
 import { useSuggest } from "./hooks/useSuggest";
 import { useSettings } from "./hooks/useSettings";
@@ -187,7 +187,7 @@ function App() {
     inputRef.current?.focus();
   }
 
-  // Insert a newline at the caret (Ctrl+Enter), keeping the caret after it.
+  // Insert a newline at the caret (Shift+Enter), keeping the caret after it.
   function insertNewline(el: HTMLTextAreaElement) {
     const start = el.selectionStart ?? query.length;
     const end = el.selectionEnd ?? query.length;
@@ -260,8 +260,7 @@ function App() {
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    // Toggle-translate shortcut: translate into the secondary target language.
-    if (matchHotkey(e, settings.toggleHotkey)) {
+    if (isTranslateAltKey(e)) {
       e.preventDefault();
       runLookup(query, false, true);
       return;
@@ -280,8 +279,7 @@ function App() {
     if (handleResultScroll(e)) {
       return;
     }
-    // Ctrl+Enter inserts a newline (Enter alone runs the search).
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+    if (isNewlineKey(e)) {
       e.preventDefault();
       insertNewline(e.currentTarget);
       return;

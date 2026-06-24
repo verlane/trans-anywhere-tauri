@@ -28,10 +28,8 @@ export interface Settings {
   suggestMaxResults: number;
   /** Primary translation target (Enter). */
   translateTarget: string;
-  /** Secondary translation target (toggle shortcut). */
+  /** Secondary translation target (Ctrl+Enter). */
   translateTargetAlt: string;
-  /** In-app shortcut to translate into the secondary target. */
-  toggleHotkey: string;
   minimizeToTray: boolean;
   alwaysOnTop: boolean;
   dbPath: string;
@@ -54,7 +52,6 @@ interface RawSettings {
   suggest_max_results: number;
   translate_target: string;
   translate_target_alt: string;
-  toggle_hotkey: string;
   minimize_to_tray: boolean;
   always_on_top: boolean;
   db_path: string;
@@ -90,7 +87,6 @@ export async function getSettings(): Promise<Settings> {
     suggestMaxResults: raw.suggest_max_results,
     translateTarget: raw.translate_target,
     translateTargetAlt: raw.translate_target_alt,
-    toggleHotkey: raw.toggle_hotkey,
     minimizeToTray: raw.minimize_to_tray,
     alwaysOnTop: raw.always_on_top,
     dbPath: raw.db_path,
@@ -111,7 +107,6 @@ export async function saveSettings(settings: Settings): Promise<void> {
     suggest_max_results: settings.suggestMaxResults,
     translate_target: settings.translateTarget,
     translate_target_alt: settings.translateTargetAlt,
-    toggle_hotkey: settings.toggleHotkey,
     minimize_to_tray: settings.minimizeToTray,
     always_on_top: settings.alwaysOnTop,
     db_path: settings.dbPath,

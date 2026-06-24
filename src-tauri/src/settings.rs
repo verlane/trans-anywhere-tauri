@@ -26,9 +26,6 @@ pub struct Settings {
     /// Secondary translation target (toggle shortcut), e.g. "ja".
     #[serde(default = "default_translate_target_alt")]
     pub translate_target_alt: String,
-    /// In-app shortcut to translate into the secondary target, e.g. "Control+Shift+Enter".
-    #[serde(default = "default_toggle_hotkey")]
-    pub toggle_hotkey: String,
     /// Hide the window to the tray when minimized instead of staying on the taskbar.
     #[serde(default)]
     pub minimize_to_tray: bool,
@@ -85,9 +82,6 @@ fn default_translate_target() -> String {
 fn default_translate_target_alt() -> String {
     "ja".into()
 }
-fn default_toggle_hotkey() -> String {
-    "Shift+Enter".into()
-}
 fn default_pron_volume() -> usize {
     MAX_PRON_VOLUME
 }
@@ -111,7 +105,6 @@ impl Default for Settings {
             suggest_max_results: default_max_results(),
             translate_target: default_translate_target(),
             translate_target_alt: default_translate_target_alt(),
-            toggle_hotkey: default_toggle_hotkey(),
             minimize_to_tray: false,
             always_on_top: false,
             db_path: String::new(),
@@ -170,7 +163,6 @@ mod tests {
         assert!(!s.auto_play);
         assert_eq!(s.translate_target, "en");
         assert_eq!(s.translate_target_alt, "ja");
-        assert_eq!(s.toggle_hotkey, "Shift+Enter");
         assert!(!s.minimize_to_tray);
         assert!(!s.always_on_top);
         assert_eq!(s.pron_volume, 100);

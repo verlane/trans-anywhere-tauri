@@ -1,6 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import type { Accent, Settings, ThemeMode } from "../lib/api";
-import { captureHotkey, prettyHotkey } from "../lib/hotkey";
+import { captureHotkey, prettyHotkey, EDITOR_KEY } from "../lib/hotkey";
 import "./SettingsPanel.css";
 
 interface SettingsPanelProps {
@@ -293,12 +293,6 @@ export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps)
           onChange={(hk) => update({ hotkey: hk })}
         />
 
-        <HotkeyRow
-          label="번역 토글 단축키"
-          value={settings.toggleHotkey}
-          onChange={(hk) => update({ toggleHotkey: hk })}
-        />
-
         <LangRow
           label="기본 번역 대상"
           value={settings.translateTarget}
@@ -334,27 +328,50 @@ export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps)
 
         <div className="settings__row settings__row--stack settings__help">
           <span className="settings__label">단축키 &amp; 사용법</span>
-          <dl className="settings__help-keys">
+          <div className="settings__help-keys">
             {(
               [
-                [prettyHotkey(settings.hotkey), "창 열기 (짧게: 표시 / 길게: 선택영역 검색)"],
-                [prettyHotkey(settings.toggleHotkey), "보조 언어로 번역"],
-                ["Enter", "검색 / 번역"],
-                ["Ctrl+Enter", "입력창 줄바꿈"],
-                ["Alt+J / Alt+K", "결과 설명 아래 / 위로 스크롤"],
-                ["Alt+H / Alt+L", "이전 / 다음 검색 (마우스 옆 버튼도 가능)"],
-                ["↑ ↓ / Del", "히스토리 이동 / 삭제"],
-                ["Esc / ↓", "히스토리 닫기 / 다시 열기"],
-              ] as ReadonlyArray<[string, string]>
-            ).map(([key, desc]) => (
-              <div className="settings__help-row" key={desc}>
-                <dt>
-                  <kbd className="settings__kbd">{key}</kbd>
-                </dt>
-                <dd className="settings__help-desc">{desc}</dd>
+                [
+                  "검색 · 입력",
+                  [
+                    [EDITOR_KEY.search, "검색 / 번역"],
+                    [EDITOR_KEY.translateAlt, "보조 언어로 번역"],
+                    [EDITOR_KEY.newline, "입력창 줄바꿈"],
+                  ],
+                ],
+                [
+                  "창 열기",
+                  [[prettyHotkey(settings.hotkey), "짧게: 표시 / 길게: 선택영역 검색"]],
+                ],
+                [
+                  "탐색",
+                  [
+                    ["Alt+H / Alt+L", "이전 / 다음 검색 (마우스 옆 버튼도 가능)"],
+                    ["↑ ↓ / Del", "히스토리 이동 / 삭제"],
+                    ["Esc / ↓", "히스토리 닫기 / 다시 열기"],
+                  ],
+                ],
+                [
+                  "결과 보기",
+                  [["Alt+J / Alt+K", "설명 아래 / 위로 스크롤"]],
+                ],
+              ] as ReadonlyArray<[string, ReadonlyArray<[string, string]>]>
+            ).map(([group, rows]) => (
+              <div className="settings__help-group" key={group}>
+                <span className="settings__help-group-title">{group}</span>
+                <dl className="settings__help-grouplist">
+                  {rows.map(([key, desc]) => (
+                    <div className="settings__help-row" key={desc}>
+                      <dt>
+                        <kbd className="settings__kbd">{key}</kbd>
+                      </dt>
+                      <dd className="settings__help-desc">{desc}</dd>
+                    </div>
+                  ))}
+                </dl>
               </div>
             ))}
-          </dl>
+          </div>
           <ul className="settings__help-list">
             <li>영어 단어 → 영한사전 (미국 / 영국 발음)</li>
             <li>일본어 단어 → 일한사전 (여성 / 남성, 녹음 없으면 TTS)</li>
