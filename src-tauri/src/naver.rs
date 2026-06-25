@@ -44,9 +44,26 @@ impl Dict {
 /// For Jako: `pron_us_url` = female, `pron_uk_url` = male (no accent concept).
 #[derive(Debug, Clone)]
 pub struct NaverResult {
+    /// Canonical headword from the search hit (`handleEntry`), used as the cache
+    /// key so inflected forms ("cheats" -> "cheat") collapse onto one entry. For
+    /// Jako this is the reading (e.g. 走った -> はしる). Empty if Naver omits it.
+    pub headword: String,
     pub definition: String,
     pub pron_us_url: Option<String>,
     pub pron_uk_url: Option<String>,
+}
+
+impl NaverResult {
+    /// The cache key for this result: the lowercased headword, or `fallback`
+    /// (the lowercased input word) when Naver omitted the headword.
+    pub fn cache_key(&self, fallback: &str) -> String {
+        let head = self.headword.trim();
+        if head.is_empty() {
+            fallback.to_string()
+        } else {
+            head.to_lowercase()
+        }
+    }
 }
 
 async fn get_json(url: &str, referer: &str) -> anyhow::Result<Value> {
@@ -196,6 +213,17 @@ fn build_definition(entry: &Value) -> String {
     out.trim().to_string()
 }
 
+/// Pull the canonical headword (`handleEntry`) from the first search hit. Naver
+/// resolves inflected forms to their base word here (cheats -> cheat), so it is
+/// used as the cache key. Returns `None` when the field is absent or empty.
+fn extract_headword(search: &Value) -> Option<String> {
+    let head = search
+        .pointer("/searchResultMap/searchResultListMap/WORD/items/0/handleEntry")
+        .and_then(Value::as_str)
+        .map(clean)?;
+    (!head.is_empty()).then_some(head)
+}
+
 /// Look up a word in the given dictionary and return its Korean definition +
 /// pronunciation urls.
 pub async fn lookup(word: &str, dict: Dict) -> anyhow::Result<Option<NaverResult>> {
@@ -218,6 +246,8 @@ pub async fn lookup(word: &str, dict: Dict) -> anyhow::Result<Option<NaverResult
         return Ok(None);
     };
 
+    let headword = extract_headword(&search).unwrap_or_else(|| word.to_string());
+
     let entry_url = format!("{}?entryId={entry_id}", dict.entry_url());
     let detail = get_json(&entry_url, dict.referer()).await?;
     let entry = detail.get("entry").unwrap_or(&Value::Null);
@@ -230,6 +260,7 @@ pub async fn lookup(word: &str, dict: Dict) -> anyhow::Result<Option<NaverResult
     let (pron_us_url, pron_uk_url) = extract_pron_urls(entry, dict);
 
     Ok(Some(NaverResult {
+        headword,
         definition,
         pron_us_url,
         pron_uk_url,
@@ -296,6 +327,27 @@ pub async fn download_pron(url: &str, dict: Dict) -> anyhow::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extract_headword_reads_handle_entry() {
+        // 네이버 검색은 굴절형을 정규 표제어로 돌려준다: cheats -> cheat.
+        let search = serde_json::json!({
+            "searchResultMap": { "searchResultListMap": { "WORD": { "items": [
+                { "handleEntry": "cheat", "entryId": "abc" }
+            ]}}}
+        });
+        assert_eq!(extract_headword(&search).as_deref(), Some("cheat"));
+    }
+
+    #[test]
+    fn extract_headword_none_when_absent() {
+        let search = serde_json::json!({
+            "searchResultMap": { "searchResultListMap": { "WORD": { "items": [
+                { "entryId": "abc" }
+            ]}}}
+        });
+        assert_eq!(extract_headword(&search), None);
+    }
 
     #[test]
     fn clean_strips_tags() {

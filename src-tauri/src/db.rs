@@ -57,6 +57,13 @@ CREATE TABLE IF NOT EXISTS entries (
 CREATE INDEX IF NOT EXISTS source_language_index ON entries (source_language COLLATE NOCASE ASC);
 CREATE INDEX IF NOT EXISTS target_language_index ON entries (target_language COLLATE NOCASE ASC);
 CREATE INDEX IF NOT EXISTS word_index ON entries (word COLLATE NOCASE ASC);
+CREATE TABLE IF NOT EXISTS aliases (
+  source_language text NOT NULL COLLATE NOCASE,
+  target_language text NOT NULL COLLATE NOCASE,
+  alias text NOT NULL COLLATE NOCASE,
+  headword text NOT NULL COLLATE NOCASE,
+  PRIMARY KEY (source_language, target_language, alias)
+);
 ";
 
 /// Open (or create) the database at `path`, ensuring the schema exists.
@@ -194,6 +201,50 @@ pub fn update_pron(
     Ok(())
 }
 
+/// Look up the canonical headword an alias points to (e.g. "cheats" -> "cheat").
+pub fn select_alias(
+    conn: &Connection,
+    sl: &str,
+    tl: &str,
+    alias: &str,
+) -> anyhow::Result<Option<String>> {
+    let head = conn
+        .query_row(
+            "SELECT headword FROM aliases
+             WHERE source_language = ?1 AND target_language = ?2 AND alias = ?3
+             LIMIT 1",
+            params![sl, tl, alias],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(head)
+}
+
+/// Record that an inflected form maps to a canonical headword, so a later lookup
+/// of the form hits the cache instead of re-querying Naver.
+pub fn upsert_alias(
+    conn: &Connection,
+    sl: &str,
+    tl: &str,
+    alias: &str,
+    headword: &str,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT INTO aliases (source_language, target_language, alias, headword)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT (source_language, target_language, alias)
+         DO UPDATE SET headword = excluded.headword",
+        params![sl, tl, alias, headword],
+    )?;
+    Ok(())
+}
+
+/// Resolve a lookup key to its canonical headword: the alias target if one is
+/// recorded, otherwise the key itself.
+pub fn resolve_key(conn: &Connection, sl: &str, tl: &str, key: &str) -> anyhow::Result<String> {
+    Ok(select_alias(conn, sl, tl, key)?.unwrap_or_else(|| key.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,4 +324,32 @@ mod tests {
         let entry = select_entry(&conn, "en", "ko", "run").unwrap().unwrap();
         assert_eq!(entry.definition, "달리다");
     }
+
+    #[test]
+    fn alias_roundtrip_and_resolve_key() {
+        let conn = mem();
+        // 별칭이 없으면 키 자신을 반환한다.
+        assert_eq!(resolve_key(&conn, "en", "ko", "cheats").unwrap(), "cheats");
+
+        upsert_alias(&conn, "en", "ko", "cheats", "cheat").unwrap();
+        assert_eq!(
+            select_alias(&conn, "en", "ko", "cheats")
+                .unwrap()
+                .as_deref(),
+            Some("cheat")
+        );
+        // 별칭이 있으면 표제어로 해석된다.
+        assert_eq!(resolve_key(&conn, "en", "ko", "cheats").unwrap(), "cheat");
+        // 표제어 자신은 별칭이 아니므로 그대로 통과한다.
+        assert_eq!(resolve_key(&conn, "en", "ko", "cheat").unwrap(), "cheat");
+    }
+
+    #[test]
+    fn upsert_alias_overwrites_target() {
+        let conn = mem();
+        upsert_alias(&conn, "en", "ko", "ran", "wrong").unwrap();
+        upsert_alias(&conn, "en", "ko", "ran", "run").unwrap();
+        assert_eq!(resolve_key(&conn, "en", "ko", "ran").unwrap(), "run");
+    }
+
 }

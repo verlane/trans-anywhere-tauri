@@ -217,16 +217,21 @@ async fn lookup_dict_word(
 ) -> Result<LookupResult, String> {
     let key = word.to_lowercase();
 
-    // 1. Cache lookup — skipped on a forced refresh. Lock is released before any await.
+    // 1. Cache lookup — skipped on a forced refresh. An inflected form (e.g.
+    //    "cheats") is resolved to its canonical headword ("cheat") first so it
+    //    hits the same cached row. Lock is released before any await.
     if !force {
-        let cached = with_db(state, |conn| db::select_entry(conn, sl, "ko", &key)).map_err(err)?;
+        let canonical =
+            with_db(state, |conn| db::resolve_key(conn, sl, "ko", &key)).map_err(err)?;
+        let cached =
+            with_db(state, |conn| db::select_entry(conn, sl, "ko", &canonical)).map_err(err)?;
         if let Some(entry) = cached {
             let mode = pron_mode(entry.has_us || entry.has_uk);
             // Backfill missing pronunciation slots once, in the background, so
             // older cached words (e.g. US-only) gain their UK audio when viewed.
             if !(entry.media_tried || (entry.has_us && entry.has_uk)) {
                 let db_path = state.db_path.lock().map(|p| p.clone()).unwrap_or_default();
-                spawn_pron_backfill(db_path, word.clone(), dict, sl);
+                spawn_pron_backfill(db_path, canonical, dict, sl);
             }
             return Ok(LookupResult::new(
                 "word",
@@ -244,29 +249,38 @@ async fn lookup_dict_word(
         return Ok(LookupResult::empty(&word));
     };
 
-    // 3. Cache the definition immediately so the result can render without waiting
-    //    on the pronunciation downloads.
+    // 3. Cache under the canonical headword Naver resolved to, and record the
+    //    inflected-form alias so the next lookup of the form skips Naver.
+    let hw = result.cache_key(&key);
     let definition = result.definition.clone();
-    let key_for_def = key.clone();
+    let hw_for_def = hw.clone();
     with_db(state, move |conn| {
-        db::upsert_entry(conn, sl, "ko", &key_for_def, &definition, None)
+        db::upsert_entry(conn, sl, "ko", &hw_for_def, &definition, None)
     })
     .map_err(err)?;
     // A fresh Naver fetch (cache miss or force-refresh) counts as an attempt.
-    let key_for_tried = key.clone();
+    let hw_for_tried = hw.clone();
     with_db(state, move |conn| {
-        db::set_media_tried(conn, sl, "ko", &key_for_tried)
+        db::set_media_tried(conn, sl, "ko", &hw_for_tried)
     })
     .map_err(err)?;
+    if key != hw {
+        let key_for_alias = key.clone();
+        let hw_for_alias = hw.clone();
+        with_db(state, move |conn| {
+            db::upsert_alias(conn, sl, "ko", &key_for_alias, &hw_for_alias)
+        })
+        .map_err(err)?;
+    }
 
     // 4. Download both pronunciation slots (media1/media2) in the background and
-    //    cache them, without blocking the response.
+    //    cache them under the headword, without blocking the response.
     let us = result.pron_us_url.clone();
     let uk = result.pron_uk_url.clone();
     let has_recording = us.is_some() || uk.is_some();
     if has_recording {
         let db_path = state.db_path.lock().map(|p| p.clone()).unwrap_or_default();
-        spawn_pron_download(db_path, sl, key, dict, us, uk);
+        spawn_pron_download(db_path, sl, hw, dict, us, uk);
     }
 
     Ok(LookupResult::new(
@@ -362,8 +376,13 @@ pub async fn ensure_pron(
     let acc = db::Accent::from_str(&accent).unwrap_or(db::Accent::Us);
     let (dict, sl) = dict_for_word(&word);
 
-    if let Some(bytes) =
-        with_db(&state, |conn| db::select_pron(conn, sl, "ko", &key, acc)).map_err(err)?
+    // Inflected forms share their headword's cached pronunciation.
+    let canonical = with_db(&state, |conn| db::resolve_key(conn, sl, "ko", &key)).map_err(err)?;
+
+    if let Some(bytes) = with_db(&state, |conn| {
+        db::select_pron(conn, sl, "ko", &canonical, acc)
+    })
+    .map_err(err)?
     {
         return Ok(bytes);
     }
@@ -371,6 +390,8 @@ pub async fn ensure_pron(
     let Some(result) = naver::lookup(&word, dict).await.map_err(err)? else {
         return Ok(Vec::new());
     };
+    // Store against the headword row so the BLOB lands beside its definition.
+    let hw = result.cache_key(&canonical);
     let url = match acc {
         db::Accent::Us => result.pron_us_url,
         db::Accent::Uk => result.pron_uk_url,
@@ -385,7 +406,7 @@ pub async fn ensure_pron(
     }
     let to_store = bytes.clone();
     with_db(&state, move |conn| {
-        db::update_pron(conn, sl, "ko", &key, acc, &to_store)
+        db::update_pron(conn, sl, "ko", &hw, acc, &to_store)
     })
     .map_err(err)?;
     Ok(bytes)
