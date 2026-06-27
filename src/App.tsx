@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { lookup, minimizeWindow, type LookupResult } from "./lib/api";
+import { lookup, minimizeWindow, type Accent, type LookupResult } from "./lib/api";
 import { resolveEscAction } from "./lib/esc";
+import { resolveActionKey, type ActionKey } from "./lib/actionKeys";
 import { isTranslateAltKey, isNewlineKey } from "./lib/hotkey";
 import { playPron, speakTts, setPronVolume } from "./lib/audio";
 import { useSuggest } from "./hooks/useSuggest";
@@ -36,6 +37,28 @@ const EMPTY_RESULT = (text: string): LookupResult => ({
   pronMode: "",
 });
 
+/** Play a word's pronunciation for the given accent, falling back to TTS. */
+function playResultPron(res: LookupResult, accent: Accent): void {
+  if (res.kind !== "word") {
+    return;
+  }
+  if (res.pronMode === "tts") {
+    speakTts(res.text, res.lang);
+    return;
+  }
+  playPron(res.text, accent);
+}
+
+/** True when there's a live text selection, so Ctrl+C should copy that, not the result. */
+function hasTextSelection(): boolean {
+  const el = document.activeElement;
+  if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+    return el.selectionStart !== el.selectionEnd;
+  }
+  const sel = window.getSelection();
+  return !!sel && !sel.isCollapsed && sel.toString().length > 0;
+}
+
 function App() {
   const { settings, update } = useSettings();
   useTheme(settings.theme);
@@ -51,9 +74,11 @@ function App() {
   const [activeIndex, setActiveIndex] = useState(-1);
   const [dismissed, setDismissed] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [copied, setCopied] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const resultRef = useRef<HTMLElement>(null);
   const runLookupRef = useRef<(text: string, force?: boolean, alt?: boolean) => void>(() => {});
+  const runActionRef = useRef<(e: globalThis.KeyboardEvent) => void>(() => {});
 
   const suggestEnabled = !dismissed && isEnglishWordFragment(query);
   const suggestions = useSuggest(query, suggestEnabled, settings.suggestMinLength);
@@ -117,16 +142,29 @@ function App() {
     };
   }, []);
 
+  // The default accent for the current result's language drives Alt+P and autoplay.
+  function defaultAccentFor(res: LookupResult): Accent {
+    return res.lang === "ja" ? settings.defaultAccentJa : settings.defaultAccentEn;
+  }
+
   function autoPlay(res: LookupResult) {
     if (res.kind !== "word" || !settings.autoPlay) {
       return;
     }
-    if (res.pronMode === "tts") {
-      speakTts(res.text, res.lang);
+    playResultPron(res, defaultAccentFor(res));
+  }
+
+  function copyResult() {
+    if (!result || !result.definition) {
       return;
     }
-    const accent = res.lang === "ja" ? settings.defaultAccentJa : settings.defaultAccentEn;
-    playPron(res.text, accent);
+    navigator.clipboard.writeText(result.definition).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      },
+      () => {},
+    );
   }
 
   async function runLookup(text: string, force = false, alt = false, fromNav = false) {
@@ -166,6 +204,70 @@ function App() {
   }
   const navBack = () => navTo(nav.goBack());
   const navForward = () => navTo(nav.goForward());
+
+  function runAction(action: ActionKey) {
+    if (action === "open-settings") {
+      setShowSettings(true);
+      return;
+    }
+    if (action === "open-favorites") {
+      setShowFavorites(true);
+      return;
+    }
+    // The remaining actions operate on the current result.
+    if (!result) {
+      return;
+    }
+    switch (action) {
+      case "play-primary":
+        playResultPron(result, defaultAccentFor(result));
+        break;
+      case "play-secondary": {
+        const other = defaultAccentFor(result) === "us" ? "uk" : "us";
+        playResultPron(result, other);
+        break;
+      }
+      case "toggle-favorite":
+        if (result.text) {
+          favorites.toggle(result.text);
+        }
+        break;
+      case "copy-result":
+        copyResult();
+        break;
+      case "refresh":
+        // Mirror the UI: refresh only applies to dictionary entries.
+        if (result.source === "naver" || result.source === "cache") {
+          runLookupRef.current(result.text, true);
+        }
+        break;
+    }
+  }
+
+  // In-app action shortcuts (Alt+P/C/D/R/B/S, Ctrl+C). Global like Esc so they
+  // work regardless of focus; disabled while a panel is open so Esc and the
+  // panel's own inputs (e.g. the hotkey capture) keep priority.
+  runActionRef.current = (e: globalThis.KeyboardEvent) => {
+    if (showSettings || showFavorites) {
+      return;
+    }
+    const action = resolveActionKey(e);
+    if (!action) {
+      return;
+    }
+    // Ctrl+C only steals copy when nothing is selected; otherwise it's a real copy.
+    if (action === "copy-result" && e.ctrlKey && hasTextSelection()) {
+      return;
+    }
+    e.preventDefault();
+    runAction(action);
+  };
+
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => runActionRef.current(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Esc is handled globally so it works regardless of focus — the input, the
   // result pane, or an open panel. Priority lives in resolveEscAction.
@@ -392,7 +494,7 @@ function App() {
           className="app__bookmark"
           onClick={() => setShowFavorites(true)}
           aria-label="단어장 열기"
-          title="단어장"
+          title="단어장 (Alt+B)"
         >
           ★
         </button>
@@ -401,7 +503,7 @@ function App() {
           className="app__gear"
           onClick={() => setShowSettings(true)}
           aria-label="설정 열기"
-          title="설정"
+          title="설정 (Alt+S)"
         >
           ⚙
         </button>
@@ -420,6 +522,9 @@ function App() {
         <ResultView
           result={result}
           loading={loading}
+          copied={copied}
+          onCopy={copyResult}
+          defaultAccent={result ? defaultAccentFor(result) : "us"}
           onRefresh={() => result && runLookup(result.text, true)}
           onWordClick={(word) => {
             wordPreview.onLeave();

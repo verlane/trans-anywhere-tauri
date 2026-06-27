@@ -1,6 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import type { Accent, Settings, ThemeMode } from "../lib/api";
 import { captureHotkey, prettyHotkey, EDITOR_KEY } from "../lib/hotkey";
+import { ACTION_KEY } from "../lib/actionKeys";
 import "./SettingsPanel.css";
 
 interface SettingsPanelProps {
@@ -354,6 +355,22 @@ export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps)
                 [
                   "결과 보기",
                   [["Alt+J / Alt+K", "설명 아래 / 위로 스크롤"]],
+                ],
+                [
+                  "결과 액션",
+                  [
+                    [`${ACTION_KEY.playPrimary} / ${ACTION_KEY.playSecondary}`, "기본 / 보조 발음 재생"],
+                    [ACTION_KEY.copy, "결과 복사"],
+                    [ACTION_KEY.toggleFavorite, "단어장에 추가 / 빼기"],
+                    [ACTION_KEY.refresh, "네이버에서 새로고침"],
+                  ],
+                ],
+                [
+                  "창 단축키",
+                  [
+                    [ACTION_KEY.openFavorites, "단어장 열기"],
+                    [ACTION_KEY.openSettings, "설정 열기"],
+                  ],
                 ],
               ] as ReadonlyArray<[string, ReadonlyArray<[string, string]>]>
             ).map(([group, rows]) => (

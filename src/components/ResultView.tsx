@@ -1,4 +1,4 @@
-import { useState, type ReactNode, type Ref } from "react";
+import { type ReactNode, type Ref } from "react";
 import type { Accent, LookupResult, LookupSource } from "../lib/api";
 import { playPron, speakTts } from "../lib/audio";
 import { buildColorMap, renderLine, hasRuby, type WordClick, type WordHandlers } from "../lib/highlight";
@@ -72,6 +72,12 @@ function renderDefinition(
 interface ResultViewProps {
   result: LookupResult | null;
   loading: boolean;
+  /** Whether the result was just copied (drives the "복사됨" flash). */
+  copied: boolean;
+  /** Copy the current definition to the clipboard. */
+  onCopy: () => void;
+  /** Default accent for this result's language, so the matching button shows Alt+P. */
+  defaultAccent: Accent;
   onRefresh: () => void;
   /** Look up a clicked English word from within the definition. */
   onWordClick?: WordClick;
@@ -95,6 +101,9 @@ interface ResultViewProps {
 export function ResultView({
   result,
   loading,
+  copied,
+  onCopy,
+  defaultAccent,
   onRefresh,
   onWordClick,
   onWordHover,
@@ -107,21 +116,6 @@ export function ResultView({
   onNavForward,
   scrollRef,
 }: ResultViewProps) {
-  const [copied, setCopied] = useState(false);
-
-  function copyDefinition() {
-    if (!result) {
-      return;
-    }
-    navigator.clipboard.writeText(result.definition).then(
-      () => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1200);
-      },
-      () => {},
-    );
-  }
-
   if (loading) {
     return <div className="result result--state">찾는 중…</div>;
   }
@@ -179,7 +173,7 @@ export function ResultView({
                   className="result__pron"
                   onClick={() => playPron(result.text, p.accent)}
                   aria-label={p.title}
-                  title={p.title}
+                  title={`${p.title} (${p.accent === defaultAccent ? "Alt+P" : "Alt+Shift+P"})`}
                 >
                   {p.label}
                 </button>
@@ -190,7 +184,7 @@ export function ResultView({
                 className="result__pron"
                 onClick={() => speakTts(result.text, result.lang)}
                 aria-label="TTS 발음 듣기"
-                title="TTS 발음 듣기"
+                title="TTS 발음 듣기 (Alt+P)"
               >
                 TTS
               </button>
@@ -201,7 +195,7 @@ export function ResultView({
                 className={isFavorite ? "result__fav result__fav--on" : "result__fav"}
                 onClick={onToggleFavorite}
                 aria-label={isFavorite ? "단어장에서 빼기" : "단어장에 저장"}
-                title={isFavorite ? "단어장에서 빼기" : "단어장에 저장"}
+                title={isFavorite ? "단어장에서 빼기 (Alt+D)" : "단어장에 저장 (Alt+D)"}
               >
                 {isFavorite ? "★" : "☆"}
               </button>
@@ -209,9 +203,9 @@ export function ResultView({
             <button
               type="button"
               className="result__copy"
-              onClick={copyDefinition}
+              onClick={onCopy}
               aria-label="결과 복사"
-              title="결과 복사"
+              title="결과 복사 (Alt+C)"
             >
               {copied ? "복사됨" : "복사"}
             </button>
@@ -225,7 +219,7 @@ export function ResultView({
                   className="result__refresh"
                   onClick={onRefresh}
                   aria-label="네이버에서 새로고침"
-                  title="네이버에서 새로고침"
+                  title="네이버에서 새로고침 (Alt+R)"
                 >
                   ↻
                 </button>
