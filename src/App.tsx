@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { lookup, minimizeWindow, type Accent, type LookupResult } from "./lib/api";
 import { resolveEscAction } from "./lib/esc";
+import { rowMove, type ChipRect } from "./lib/chipGrid";
 import { resolveActionKey, type ActionKey } from "./lib/actionKeys";
 import { isTranslateAltKey, isNewlineKey } from "./lib/hotkey";
 import { playPron, speakTts, setPronVolume } from "./lib/audio";
@@ -71,7 +72,6 @@ function App() {
   const nav = useNavStack();
   const [showFavorites, setShowFavorites] = useState(false);
   const [query, setQuery] = useState("");
-  const [focused, setFocused] = useState(false);
   const [result, setResult] = useState<LookupResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -80,6 +80,7 @@ function App() {
   const [copied, setCopied] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const resultRef = useRef<HTMLElement>(null);
+  const chipsRef = useRef<HTMLDivElement>(null);
   const runLookupRef =
     useRef<(text: string, force?: boolean, alt?: boolean, fromNav?: boolean, single?: boolean) => void>(
       () => {},
@@ -89,10 +90,11 @@ function App() {
   const suggestEnabled = !dismissed && isEnglishWordFragment(query);
   const suggestions = useSuggest(query, suggestEnabled, settings.suggestMinLength);
   const showSuggest = suggestEnabled && suggestions.length > 0;
-  const showHistory =
-    !dismissed && focused && query.trim() === "" && history.items.length > 0;
-  // The currently visible dropdown (autocomplete or history) drives keyboard nav.
-  const dropdownItems = showSuggest ? suggestions : showHistory ? history.items : [];
+  // Recent-search chips replace the result pane on the empty screen and accept
+  // the same keyboard nav as the autocomplete dropdown.
+  const showChips = query.trim() === "" && !loading && history.items.length > 0;
+  // The currently navigable list (autocomplete dropdown or recent chips).
+  const navItems = showSuggest ? suggestions : showChips ? history.items : [];
 
   useEffect(() => {
     setActiveIndex(-1);
@@ -287,7 +289,7 @@ function App() {
       const action = resolveEscAction({
         settingsOpen: showSettings,
         favoritesOpen: showFavorites,
-        dropdownOpen: showSuggest || showHistory,
+        dropdownOpen: showSuggest,
       });
       switch (action) {
         case "close-settings":
@@ -306,7 +308,7 @@ function App() {
     };
     window.addEventListener("keydown", onEsc);
     return () => window.removeEventListener("keydown", onEsc);
-  }, [showSettings, showFavorites, showSuggest, showHistory]);
+  }, [showSettings, showFavorites, showSuggest]);
 
   useEffect(() => {
     function onMouseUp(e: MouseEvent) {
@@ -377,23 +379,48 @@ function App() {
     return false;
   }
 
-  // History-specific keys: reopen with ArrowDown (after Esc), delete with Del.
-  function handleHistoryKeys(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
-    if (e.key === "ArrowDown" && dismissed && query.trim() === "" && history.items.length > 0) {
+  // Measured positions of the rendered chips, for row-aware up/down nav.
+  function chipRects(): ChipRect[] {
+    const el = chipsRef.current;
+    if (!el) {
+      return [];
+    }
+    return Array.from(el.children).map((c) => ({
+      top: (c as HTMLElement).offsetTop,
+      left: (c as HTMLElement).offsetLeft,
+    }));
+  }
+
+  // Recent-search chips: ←/→ move within a row, ↑/↓ move between rows (chips
+  // wrap), Del removes the highlighted chip.
+  function handleChipsKeys(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
+    if (!showChips) {
+      return false;
+    }
+    if (e.key === "ArrowRight") {
       e.preventDefault();
-      setDismissed(false);
-      setActiveIndex(0);
+      setActiveIndex((i) => Math.min(history.items.length - 1, i + 1));
       return true;
     }
-    if (
-      showHistory &&
-      e.key === "Delete" &&
-      activeIndex >= 0 &&
-      activeIndex < dropdownItems.length
-    ) {
+    if (e.key === "ArrowLeft") {
       e.preventDefault();
-      history.remove(dropdownItems[activeIndex]);
-      if (activeIndex >= dropdownItems.length - 1) {
+      setActiveIndex((i) => Math.max(0, i - 1));
+      return true;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIndex((i) => rowMove(chipRects(), i, "down"));
+      return true;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIndex((i) => rowMove(chipRects(), i, "up"));
+      return true;
+    }
+    if (e.key === "Delete" && activeIndex >= 0 && activeIndex < history.items.length) {
+      e.preventDefault();
+      history.remove(history.items[activeIndex]);
+      if (activeIndex >= history.items.length - 1) {
         setActiveIndex(activeIndex - 1);
       }
       return true;
@@ -426,16 +453,16 @@ function App() {
       insertNewline(e.currentTarget);
       return;
     }
-    if (handleHistoryKeys(e)) {
+    if (handleChipsKeys(e)) {
       return;
     }
-    if ((showSuggest || showHistory) && handleDropdownNav(e, dropdownItems)) {
+    if ((showSuggest || showChips) && handleDropdownNav(e, navItems)) {
       return;
     }
     if (e.key === "Enter") {
       e.preventDefault();
-      if (activeIndex >= 0 && activeIndex < dropdownItems.length) {
-        const picked = dropdownItems[activeIndex];
+      if (activeIndex >= 0 && activeIndex < navItems.length) {
+        const picked = navItems[activeIndex];
         setQuery(picked);
         runLookup(picked);
       } else {
@@ -463,8 +490,6 @@ function App() {
               setDismissed(false);
             }}
             onKeyDown={onKeyDown}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setTimeout(() => setFocused(false), 120)}
           />
           {query && (
             <button
@@ -483,18 +508,6 @@ function App() {
           )}
           {showSuggest && (
             <SuggestList items={suggestions} activeIndex={activeIndex} onPick={pickWord} />
-          )}
-          {showHistory && (
-            <SuggestList
-              items={history.items}
-              activeIndex={activeIndex}
-              onPick={(term) => {
-                setQuery(term);
-                setFocused(false);
-                runLookup(term);
-              }}
-              onDelete={(term) => history.remove(term)}
-            />
           )}
         </div>
         <button
@@ -516,9 +529,11 @@ function App() {
           ⚙
         </button>
       </div>
-      {query.trim() === "" && !loading && history.items.length > 0 ? (
+      {showChips ? (
         <RecentChips
           items={history.items}
+          activeIndex={activeIndex}
+          listRef={chipsRef}
           onPick={(term) => {
             setQuery(term);
             setDismissed(true);
