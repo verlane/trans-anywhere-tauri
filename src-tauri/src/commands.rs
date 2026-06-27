@@ -188,11 +188,15 @@ pub fn suggest(query: String, state: State<'_, AppState>) -> Vec<String> {
 
 /// Main lookup pipeline. Sentences go to Google; English words hit the SQLite
 /// cache first and fall back to the Naver dictionary (caching the result).
+/// `single` forces a single-entry lookup for a kana reading instead of the
+/// homophone group — used when drilling into one row of a grouped result (its
+/// kana-only headword would otherwise route back to the same group).
 #[tauri::command]
 pub async fn lookup(
     text: String,
     force: bool,
     alt: bool,
+    single: bool,
     state: State<'_, AppState>,
 ) -> Result<LookupResult, String> {
     let trimmed = text.trim().to_string();
@@ -211,6 +215,10 @@ pub async fn lookup(
             lookup_dict_word(trimmed, naver::Dict::Enko, "en", force, &state).await
         }
         Route::JapaneseWord => {
+            lookup_dict_word(trimmed, naver::Dict::Jako, "ja", force, &state).await
+        }
+        // A kana reading groups its homophones, unless we're drilling into one.
+        Route::JapaneseReading if single => {
             lookup_dict_word(trimmed, naver::Dict::Jako, "ja", force, &state).await
         }
         Route::JapaneseReading => lookup_reading_word(trimmed, force, &state).await,

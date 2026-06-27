@@ -82,9 +82,15 @@ export async function suggest(query: string): Promise<string[]> {
   return invoke<string[]>("suggest", { query });
 }
 
-/** `alt` (toggle shortcut) translates into the secondary target instead of using dictionaries. */
-export async function lookup(text: string, force = false, alt = false): Promise<LookupResult> {
-  return invoke<LookupResult>("lookup", { text, force, alt });
+/** `alt` (toggle shortcut) translates into the secondary target instead of using dictionaries.
+ *  `single` forces a single-entry lookup for a kana reading (used when opening one grouped row). */
+export async function lookup(
+  text: string,
+  force = false,
+  alt = false,
+  single = false,
+): Promise<LookupResult> {
+  return invoke<LookupResult>("lookup", { text, force, alt, single });
 }
 
 /** Pronunciation MP3 bytes for a word and accent: cached BLOB, else fetched from Naver. */

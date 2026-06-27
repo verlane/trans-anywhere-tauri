@@ -17,6 +17,7 @@ import { WordTooltip } from "./components/WordTooltip";
 import { useFavorites } from "./hooks/useFavorites";
 import { useWordPreview } from "./hooks/useWordPreview";
 import { useNavStack } from "./hooks/useNavStack";
+import type { NavEntry } from "./lib/navStack";
 import { SettingsPanel } from "./components/SettingsPanel";
 import "./App.css";
 
@@ -79,7 +80,10 @@ function App() {
   const [copied, setCopied] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const resultRef = useRef<HTMLElement>(null);
-  const runLookupRef = useRef<(text: string, force?: boolean, alt?: boolean) => void>(() => {});
+  const runLookupRef =
+    useRef<(text: string, force?: boolean, alt?: boolean, fromNav?: boolean, single?: boolean) => void>(
+      () => {},
+    );
   const runActionRef = useRef<(e: globalThis.KeyboardEvent) => void>(() => {});
 
   const suggestEnabled = !dismissed && isEnglishWordFragment(query);
@@ -169,7 +173,7 @@ function App() {
     );
   }
 
-  async function runLookup(text: string, force = false, alt = false, fromNav = false) {
+  async function runLookup(text: string, force = false, alt = false, fromNav = false, single = false) {
     const trimmed = text.trim();
     if (!trimmed) {
       return;
@@ -177,14 +181,14 @@ function App() {
     setDismissed(true);
     setLoading(true);
     try {
-      const res = await lookup(trimmed, force, alt);
+      const res = await lookup(trimmed, force, alt, single);
       setResult(res);
       autoPlay(res);
       if (res.kind !== "empty") {
         history.add(trimmed);
         // Back/forward moves replay an existing entry — don't re-push them.
         if (!fromNav) {
-          nav.push(trimmed);
+          nav.push(trimmed, single);
         }
       }
     } catch {
@@ -195,14 +199,15 @@ function App() {
   }
   runLookupRef.current = runLookup;
 
-  function navTo(term: string | null) {
-    if (term === null) {
+  function navTo(entry: NavEntry | null) {
+    if (entry === null) {
       return;
     }
     wordPreview.onLeave();
-    setQuery(term);
+    setQuery(entry.term);
     setDismissed(true);
-    runLookup(term, false, false, true);
+    // Replay in the same mode it was visited (group vs single drill-in).
+    runLookup(entry.term, false, false, true, entry.single);
   }
   const navBack = () => navTo(nav.goBack());
   const navForward = () => navTo(nav.goForward());
@@ -238,9 +243,10 @@ function App() {
         copyResult();
         break;
       case "refresh":
-        // Mirror the UI: refresh only applies to dictionary entries.
+        // Mirror the UI: refresh only applies to dictionary entries. Keep the
+        // current mode — a group stays a group, a single drill-in stays single.
         if (result.source === "naver" || result.source === "cache") {
-          runLookupRef.current(result.text, true);
+          runLookupRef.current(result.text, true, false, false, result.entries.length === 0);
         }
         break;
     }
@@ -527,12 +533,14 @@ function App() {
           copied={copied}
           onCopy={copyResult}
           defaultAccent={result ? defaultAccentFor(result) : "us"}
-          onRefresh={() => result && runLookup(result.text, true)}
+          onRefresh={() => result && runLookup(result.text, true, false, false, result.entries.length === 0)}
           onWordClick={(word) => {
             wordPreview.onLeave();
             setQuery(word);
             setDismissed(true);
-            runLookup(word);
+            // A clicked word (group row or in-definition word) opens its own
+            // entry — force single so a kana headword doesn't re-group.
+            runLookup(word, false, false, false, true);
           }}
           onWordHover={wordPreview.onEnter}
           onWordLeave={wordPreview.onLeave}
