@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export type LookupKind = "word" | "sentence" | "empty";
 export type LookupSource = "cache" | "naver" | "google" | "";
@@ -60,6 +61,12 @@ interface RawSettings {
   theme: string;
   text_scale: number;
   hover_preview: boolean;
+}
+
+/** Minimize the main window. Honors the "minimize to tray" setting via the
+ *  window-event handler in lib.rs, which hides to the tray when that's enabled. */
+export async function minimizeWindow(): Promise<void> {
+  await getCurrentWindow().minimize();
 }
 
 export async function suggest(query: string): Promise<string[]> {

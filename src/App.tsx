@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { lookup, type LookupResult } from "./lib/api";
+import { lookup, minimizeWindow, type LookupResult } from "./lib/api";
+import { resolveEscAction } from "./lib/esc";
 import { isTranslateAltKey, isNewlineKey } from "./lib/hotkey";
 import { playPron, speakTts, setPronVolume } from "./lib/audio";
 import { useSuggest } from "./hooks/useSuggest";
@@ -166,6 +167,37 @@ function App() {
   const navBack = () => navTo(nav.goBack());
   const navForward = () => navTo(nav.goForward());
 
+  // Esc is handled globally so it works regardless of focus — the input, the
+  // result pane, or an open panel. Priority lives in resolveEscAction.
+  useEffect(() => {
+    const onEsc = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape" || e.isComposing) {
+        return;
+      }
+      const action = resolveEscAction({
+        settingsOpen: showSettings,
+        favoritesOpen: showFavorites,
+        dropdownOpen: showSuggest || showHistory,
+      });
+      switch (action) {
+        case "close-settings":
+          setShowSettings(false);
+          break;
+        case "close-favorites":
+          setShowFavorites(false);
+          break;
+        case "dismiss-dropdown":
+          setDismissed(true);
+          break;
+        case "minimize":
+          minimizeWindow();
+          break;
+      }
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [showSettings, showFavorites, showSuggest, showHistory]);
+
   useEffect(() => {
     function onMouseUp(e: MouseEvent) {
       // Mouse side buttons: 3 = back, 4 = forward.
@@ -300,9 +332,6 @@ function App() {
         runLookup(query);
       }
       return;
-    }
-    if (e.key === "Escape") {
-      setDismissed(true);
     }
   }
 
