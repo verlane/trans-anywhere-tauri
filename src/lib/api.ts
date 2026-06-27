@@ -8,6 +8,13 @@ export type ThemeMode = "light" | "dark" | "system";
 
 export type PronMode = "recorded" | "tts" | "";
 
+/** One homophone in a grouped kana-reading result (かえる → 帰る / 変える / …). */
+export interface GroupEntry {
+  word: string;
+  /** Compact one-line meaning shown in the grouped view; click the word for full detail. */
+  gloss: string;
+}
+
 export interface LookupResult {
   kind: LookupKind;
   text: string;
@@ -17,6 +24,8 @@ export interface LookupResult {
   lang: string;
   /** "recorded" = cached MP3, "tts" = synthesize on client, "" = not a dictionary entry. */
   pronMode: PronMode;
+  /** Homophones for a kana reading; empty for an ordinary single-word result. */
+  entries: GroupEntry[];
 }
 
 export interface Settings {

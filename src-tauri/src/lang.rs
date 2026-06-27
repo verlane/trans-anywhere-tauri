@@ -38,6 +38,19 @@ pub fn has_japanese(text: &str) -> bool {
     text.chars().any(is_japanese_char)
 }
 
+fn is_kana_char(c: char) -> bool {
+    // Hiragana + Katakana (the katakana block already covers the ー long-sound mark).
+    matches!(c, '\u{3040}'..='\u{309F}' | '\u{30A0}'..='\u{30FF}')
+}
+
+/// True when the input is non-empty and made up only of Japanese kana (no kanji).
+/// Such a string is a *reading* that may map to several homophone headwords
+/// (e.g. かえる -> 帰る / 変える / 返る / 蛙), so it routes to the grouped lookup.
+pub fn is_kana_only(text: &str) -> bool {
+    let trimmed = text.trim();
+    !trimmed.is_empty() && trimmed.chars().all(is_kana_char)
+}
+
 /// Mirrors v1 IsEnglish: only ASCII letters, digits and a few word symbols.
 pub fn is_english(text: &str) -> bool {
     let trimmed = text.trim();
@@ -112,5 +125,21 @@ mod tests {
     #[test]
     fn flags_long_japanese_as_sentence() {
         assert!(is_sentence("これはとても長い日本語の文章です"));
+    }
+
+    #[test]
+    fn kana_only_detects_readings_without_kanji() {
+        // 가나만으로 된 입력은 같은 읽기의 동음이의어를 가질 수 있는 "읽기"다.
+        assert!(is_kana_only("かえる"));
+        assert!(is_kana_only("カット"));
+        assert!(is_kana_only("コーヒー")); // 장음 부호 포함
+    }
+
+    #[test]
+    fn kana_only_rejects_kanji_english_and_empty() {
+        assert!(!is_kana_only("帰る")); // 한자 포함 → 정확한 단어
+        assert!(!is_kana_only("present")); // 영어
+        assert!(!is_kana_only("")); // 빈 입력
+        assert!(!is_kana_only("   ")); // 공백뿐
     }
 }

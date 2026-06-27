@@ -64,7 +64,18 @@ CREATE TABLE IF NOT EXISTS aliases (
   headword text NOT NULL COLLATE NOCASE,
   PRIMARY KEY (source_language, target_language, alias)
 );
+CREATE TABLE IF NOT EXISTS readings (
+  source_language text NOT NULL COLLATE NOCASE,
+  target_language text NOT NULL COLLATE NOCASE,
+  reading text NOT NULL COLLATE NOCASE,
+  headwords text NOT NULL,
+  PRIMARY KEY (source_language, target_language, reading)
+);
 ";
+
+/// Separator joining the ordered homophone headwords stored in `readings.headwords`.
+/// A newline never appears inside a single headword, so it round-trips cleanly.
+const READING_SEP: char = '\n';
 
 /// Open (or create) the database at `path`, ensuring the schema exists.
 pub fn open(path: &Path) -> anyhow::Result<Connection> {
@@ -245,6 +256,51 @@ pub fn resolve_key(conn: &Connection, sl: &str, tl: &str, key: &str) -> anyhow::
     Ok(select_alias(conn, sl, tl, key)?.unwrap_or_else(|| key.to_string()))
 }
 
+/// Record the ordered homophone headwords a kana reading expands to (かえる ->
+/// 帰る/変える/...), so a later lookup of the reading can rebuild the group from
+/// cache without re-querying Naver. Each headword's definition lives in `entries`.
+pub fn upsert_reading(
+    conn: &Connection,
+    sl: &str,
+    tl: &str,
+    reading: &str,
+    headwords: &[String],
+) -> anyhow::Result<()> {
+    let joined = headwords.join(&READING_SEP.to_string());
+    conn.execute(
+        "INSERT INTO readings (source_language, target_language, reading, headwords)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT (source_language, target_language, reading)
+         DO UPDATE SET headwords = excluded.headwords",
+        params![sl, tl, reading, joined],
+    )?;
+    Ok(())
+}
+
+/// Fetch the ordered homophone headwords a kana reading maps to, if recorded.
+pub fn select_reading(
+    conn: &Connection,
+    sl: &str,
+    tl: &str,
+    reading: &str,
+) -> anyhow::Result<Option<Vec<String>>> {
+    let joined: Option<String> = conn
+        .query_row(
+            "SELECT headwords FROM readings
+             WHERE source_language = ?1 AND target_language = ?2 AND reading = ?3
+             LIMIT 1",
+            params![sl, tl, reading],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(joined.map(|s| {
+        s.split(READING_SEP)
+            .filter(|w| !w.is_empty())
+            .map(String::from)
+            .collect()
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -352,4 +408,34 @@ mod tests {
         assert_eq!(resolve_key(&conn, "en", "ko", "ran").unwrap(), "run");
     }
 
+    #[test]
+    fn reading_roundtrip_preserves_order() {
+        let conn = mem();
+        // 등록 전에는 읽기 묶음이 없다.
+        assert!(select_reading(&conn, "ja", "ko", "かえる")
+            .unwrap()
+            .is_none());
+
+        let words = vec!["帰る".to_string(), "変える".to_string(), "返る".to_string()];
+        upsert_reading(&conn, "ja", "ko", "かえる", &words).unwrap();
+
+        let got = select_reading(&conn, "ja", "ko", "かえる")
+            .unwrap()
+            .unwrap();
+        assert_eq!(got, words); // 순서 보존
+    }
+
+    #[test]
+    fn upsert_reading_overwrites_existing_group() {
+        let conn = mem();
+        upsert_reading(&conn, "ja", "ko", "かえる", &["古い".to_string()]).unwrap();
+        let fresh = vec!["帰る".to_string(), "蛙".to_string()];
+        upsert_reading(&conn, "ja", "ko", "かえる", &fresh).unwrap();
+        assert_eq!(
+            select_reading(&conn, "ja", "ko", "かえる")
+                .unwrap()
+                .unwrap(),
+            fresh
+        );
+    }
 }

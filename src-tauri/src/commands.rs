@@ -28,6 +28,37 @@ pub fn resolve_db_path(settings: &Settings, data_dir: &Path) -> PathBuf {
     }
 }
 
+/// One homophone in a grouped kana-reading result (かえる -> 帰る / 変える / ...).
+/// The frontend renders each as a clickable heading + one-line gloss; clicking
+/// the heading opens that word's full entry (a cache hit).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupEntry {
+    pub word: String,
+    /// Compact one-line meaning (Naver's primary gloss) for the grouped view.
+    pub gloss: String,
+}
+
+impl GroupEntry {
+    fn new(word: &str, gloss: &str) -> Self {
+        Self {
+            word: word.into(),
+            gloss: gloss.into(),
+        }
+    }
+}
+
+/// First non-empty line of a definition — Naver's primary meaning — used as the
+/// compact one-line gloss in the grouped reading view.
+fn gloss_line(definition: &str) -> String {
+    definition
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("")
+        .to_string()
+}
+
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LookupResult {
@@ -41,6 +72,9 @@ pub struct LookupResult {
     /// Pronunciation playback mode: "recorded" (cached MP3 from Naver), "tts"
     /// (no recording — synthesize on the client), or "" (not a dictionary entry).
     pub pron_mode: String,
+    /// Homophones for a kana reading. Empty for an ordinary single-word result;
+    /// populated only when the input was a reading that maps to several words.
+    pub entries: Vec<GroupEntry>,
 }
 
 impl LookupResult {
@@ -59,11 +93,34 @@ impl LookupResult {
             source: source.into(),
             lang: lang.into(),
             pron_mode: pron_mode.into(),
+            entries: Vec::new(),
         }
     }
 
     fn empty(text: &str) -> Self {
         Self::new("empty", text.into(), String::new(), "", "", "")
+    }
+}
+
+/// Assemble a grouped result from homophone entries. The joined definition is the
+/// copy/empty-check fallback; `entries` drives the clickable per-word rendering.
+fn build_group_result(reading: &str, entries: Vec<GroupEntry>, source: &str) -> LookupResult {
+    if entries.is_empty() {
+        return LookupResult::empty(reading);
+    }
+    let definition = entries
+        .iter()
+        .map(|e| format!("{} {}", e.word, e.gloss))
+        .collect::<Vec<_>>()
+        .join("\n");
+    LookupResult {
+        kind: "word".into(),
+        text: reading.into(),
+        definition,
+        source: source.into(),
+        lang: "ja".into(),
+        pron_mode: String::new(),
+        entries,
     }
 }
 
@@ -82,6 +139,8 @@ enum Route {
     Sentence,
     EnglishWord,
     JapaneseWord,
+    /// A kana-only reading that may map to several homophone words.
+    JapaneseReading,
     OtherWord,
 }
 
@@ -92,6 +151,7 @@ fn route(text: &str) -> Route {
     }
     match lang::detect(text) {
         lang::Lang::En => Route::EnglishWord,
+        lang::Lang::Ja if lang::is_kana_only(text) => Route::JapaneseReading,
         lang::Lang::Ja => Route::JapaneseWord,
         _ => Route::OtherWord,
     }
@@ -153,9 +213,89 @@ pub async fn lookup(
         Route::JapaneseWord => {
             lookup_dict_word(trimmed, naver::Dict::Jako, "ja", force, &state).await
         }
+        Route::JapaneseReading => lookup_reading_word(trimmed, force, &state).await,
         // Non-dictionary single word (e.g. Korean): translate into the primary target.
         Route::OtherWord => translate_input(&trimmed, false, &state).await,
     }
+}
+
+/// How many homophone entries a kana reading expands to at most.
+const READING_MAX: usize = 5;
+
+/// Look up a kana reading and return the homophones that share it as one grouped
+/// result (かえる -> 帰る / 変える / 返る / 蛙). Each homophone is cached as its
+/// own `entries` row so a later direct lookup — or a click into its detail —
+/// hits the cache, and the reading→headwords mapping is recorded for a warm
+/// rebuild with no network. The cache source language is always "ja".
+async fn lookup_reading_word(
+    reading: String,
+    force: bool,
+    state: &State<'_, AppState>,
+) -> Result<LookupResult, String> {
+    let sl = "ja";
+
+    // 1. Warm path: rebuild the group from cache when the reading and every one
+    //    of its headword entries are present. Any miss falls through to Naver.
+    if !force {
+        let cached_words =
+            with_db(state, |c| db::select_reading(c, sl, "ko", &reading)).map_err(err)?;
+        if let Some(words) = cached_words {
+            let mut entries = Vec::with_capacity(words.len());
+            let mut all_hit = true;
+            for word in &words {
+                let key = word.to_lowercase();
+                match with_db(state, |c| db::select_entry(c, sl, "ko", &key)).map_err(err)? {
+                    Some(entry) => {
+                        entries.push(GroupEntry::new(word, &gloss_line(&entry.definition)))
+                    }
+                    None => {
+                        all_hit = false;
+                        break;
+                    }
+                }
+            }
+            if all_hit && !entries.is_empty() {
+                return Ok(build_group_result(&reading, entries, "cache"));
+            }
+        }
+    }
+
+    // 2. Naver: fetch the homophone group (entry details in parallel).
+    let results = naver::lookup_reading(&reading, naver::Dict::Jako, READING_MAX)
+        .await
+        .map_err(err)?;
+    if results.is_empty() {
+        return Ok(LookupResult::empty(&reading));
+    }
+
+    // 3. Cache each homophone as a standalone entry (so it's reusable + clickable),
+    //    kick off its pronunciation download, and record the reading group.
+    let mut entries = Vec::with_capacity(results.len());
+    let mut headwords = Vec::with_capacity(results.len());
+    for result in &results {
+        let hw = result.cache_key(&reading.to_lowercase());
+        with_db(state, |c| {
+            db::upsert_entry(c, sl, "ko", &hw, &result.definition, None)
+        })
+        .map_err(err)?;
+        with_db(state, |c| db::set_media_tried(c, sl, "ko", &hw)).map_err(err)?;
+
+        let us = result.pron_us_url.clone();
+        let uk = result.pron_uk_url.clone();
+        if us.is_some() || uk.is_some() {
+            let db_path = state.db_path.lock().map(|p| p.clone()).unwrap_or_default();
+            spawn_pron_download(db_path, sl, hw.clone(), naver::Dict::Jako, us, uk);
+        }
+
+        entries.push(GroupEntry::new(&hw, &gloss_line(&result.definition)));
+        headwords.push(hw);
+    }
+    with_db(state, |c| {
+        db::upsert_reading(c, sl, "ko", &reading, &headwords)
+    })
+    .map_err(err)?;
+
+    Ok(build_group_result(&reading, entries, "naver"))
 }
 
 /// Translate the input with Google into the target resolved from settings.
@@ -498,6 +638,56 @@ mod tests {
     #[test]
     fn routes_korean_word_to_other() {
         assert!(matches!(route("사전"), Route::OtherWord));
+    }
+
+    #[test]
+    fn routes_kana_reading_to_japanese_reading() {
+        // 가나만으로 검색하면 동음이의어 묶음 경로로 간다.
+        assert!(matches!(route("かえる"), Route::JapaneseReading));
+    }
+
+    #[test]
+    fn routes_kanji_word_stays_single_japanese_word() {
+        // 한자 단어는 기존 단일 사전 경로 유지(회귀 방지).
+        assert!(matches!(route("帰る"), Route::JapaneseWord));
+    }
+
+    #[test]
+    fn build_group_result_joins_entries_for_copy_and_keeps_list() {
+        let entries = vec![
+            GroupEntry::new("帰る", "돌아가다, 돌아오다"),
+            GroupEntry::new("変える", "바꾸다, 변하다"),
+        ];
+        let res = build_group_result("かえる", entries, "cache");
+        assert_eq!(res.kind, "word");
+        assert_eq!(res.text, "かえる");
+        assert_eq!(res.lang, "ja");
+        assert_eq!(res.source, "cache");
+        // 묶음 목록은 프론트 렌더(클릭→상세)용으로 보존된다.
+        assert_eq!(res.entries.len(), 2);
+        assert_eq!(res.entries[0].word, "帰る");
+        assert_eq!(res.entries[0].gloss, "돌아가다, 돌아오다");
+        // 합친 텍스트는 복사/빈값 체크용으로 단어 + 한 줄 뜻을 포함한다.
+        assert!(res.definition.contains("帰る"));
+        assert!(res.definition.contains("돌아가다"));
+        assert!(res.definition.contains("変える"));
+        assert!(res.definition.contains("바꾸다"));
+    }
+
+    #[test]
+    fn build_group_result_empty_entries_is_empty_kind() {
+        let res = build_group_result("かえる", Vec::new(), "naver");
+        assert_eq!(res.kind, "empty");
+    }
+
+    #[test]
+    fn gloss_line_takes_first_nonempty_line() {
+        // 네이버 정의의 첫 줄(대표 뜻)만 묶음 요약으로 쓴다.
+        let def = "바꾸다, 변하다, 고치다\n\n変える\n1. 바꾸다.\n2. 변하다";
+        assert_eq!(gloss_line(def), "바꾸다, 변하다, 고치다");
+        // 앞에 빈 줄이 있어도 첫 내용 줄을 집는다.
+        assert_eq!(gloss_line("\n  돌아가다\n1. ..."), "돌아가다");
+        assert_eq!(gloss_line(""), "");
     }
 
     #[test]

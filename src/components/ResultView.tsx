@@ -1,5 +1,5 @@
 import { type ReactNode, type Ref } from "react";
-import type { Accent, LookupResult, LookupSource } from "../lib/api";
+import type { Accent, GroupEntry, LookupResult, LookupSource } from "../lib/api";
 import { playPron, speakTts } from "../lib/audio";
 import { buildColorMap, renderLine, hasRuby, type WordClick, type WordHandlers } from "../lib/highlight";
 import "./ResultView.css";
@@ -67,6 +67,23 @@ function renderDefinition(
       </div>
     );
   });
+}
+
+/** Render grouped homophones (かえる → 帰る / 変える / …) as a compact list: each
+ *  row is a clickable kanji + a one-line gloss; the click opens the full entry. */
+function renderGroup(entries: GroupEntry[], onClick?: WordClick): ReactNode {
+  return entries.map((entry, i) => (
+    <button
+      key={i}
+      type="button"
+      className="def__group"
+      onClick={() => onClick?.(entry.word)}
+      title={`${entry.word} 상세 보기`}
+    >
+      <span className="def__group-head">{entry.word}</span>
+      <span className="def__group-gloss">{entry.gloss}</span>
+    </button>
+  ));
 }
 
 interface ResultViewProps {
@@ -232,6 +249,8 @@ export function ResultView({
       </header>
       {isSentence ? (
         <p className="result__body">{result.definition}</p>
+      ) : result.entries.length > 0 ? (
+        <div className="result__body result__body--group">{renderGroup(result.entries, onWordClick)}</div>
       ) : (
         <div className="result__body">
           {renderDefinition(result.definition, result.text, {

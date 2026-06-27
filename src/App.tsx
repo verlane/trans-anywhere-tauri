@@ -35,11 +35,13 @@ const EMPTY_RESULT = (text: string): LookupResult => ({
   source: "",
   lang: "",
   pronMode: "",
+  entries: [],
 });
 
 /** Play a word's pronunciation for the given accent, falling back to TTS. */
 function playResultPron(res: LookupResult, accent: Accent): void {
-  if (res.kind !== "word") {
+  // A grouped reading (かえる → several words) has no single pronunciation.
+  if (res.kind !== "word" || res.entries.length > 0) {
     return;
   }
   if (res.pronMode === "tts") {

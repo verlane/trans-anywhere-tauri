@@ -224,6 +224,106 @@ fn extract_headword(search: &Value) -> Option<String> {
     (!head.is_empty()).then_some(head)
 }
 
+/// The headword shown for a Jako search item. `handleEntry` is only the reading
+/// (かえる for every homophone), so prefer the kanji surface in `expKanji`, taking
+/// the first of any "·"-joined variants (帰る·還る -> 帰る) as the clickable/cache
+/// key. Falls back to the reading for kana-only entries (loanwords).
+fn item_headword(item: &Value) -> Option<String> {
+    if let Some(kanji) = item.get("expKanji").and_then(Value::as_str) {
+        let primary = clean(kanji);
+        let primary = primary.split('·').next().unwrap_or("").trim();
+        if !primary.is_empty() {
+            return Some(primary.to_string());
+        }
+    }
+    item.get("handleEntry")
+        .and_then(Value::as_str)
+        .map(clean)
+        .filter(|s| !s.is_empty())
+}
+
+/// Collect up to `max` `(entryId, headword)` pairs from a search response, in
+/// result order. A kana reading (かえる) returns several homophone hits here;
+/// items missing a usable headword are skipped.
+fn extract_search_items(search: &Value, max: usize) -> Vec<(String, String)> {
+    let Some(items) = search
+        .pointer("/searchResultMap/searchResultListMap/WORD/items")
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for item in items {
+        if out.len() >= max {
+            break;
+        }
+        let entry_id = item.get("entryId").and_then(|v| {
+            v.as_str()
+                .map(String::from)
+                .or_else(|| v.as_i64().map(|n| n.to_string()))
+        });
+        // Skip homophones whose first kanji surface repeats (帰る·還る then 帰る),
+        // so the group never shows the same headword — and its cache row — twice.
+        if let (Some(id), Some(head)) = (entry_id, item_headword(item)) {
+            if seen.insert(head.clone()) {
+                out.push((id, head));
+            }
+        }
+    }
+    out
+}
+
+/// Fetch one entry's detail JSON and build its `NaverResult`, or `None` when the
+/// entry has no usable definition.
+async fn fetch_entry(entry_id: &str, headword: String, dict: Dict) -> Option<NaverResult> {
+    let entry_url = format!("{}?entryId={entry_id}", dict.entry_url());
+    let detail = get_json(&entry_url, dict.referer()).await.ok()?;
+    let entry = detail.get("entry").unwrap_or(&Value::Null);
+    let definition = build_definition(entry);
+    if definition.is_empty() {
+        return None;
+    }
+    let (pron_us_url, pron_uk_url) = extract_pron_urls(entry, dict);
+    Some(NaverResult {
+        headword,
+        definition,
+        pron_us_url,
+        pron_uk_url,
+    })
+}
+
+/// Look up a kana reading and return up to `max` homophone entries that share it
+/// (かえる -> 帰る / 変える / 返る / 蛙). Entry details are fetched concurrently;
+/// results keep the search (relevance) order.
+pub async fn lookup_reading(
+    reading: &str,
+    dict: Dict,
+    max: usize,
+) -> anyhow::Result<Vec<NaverResult>> {
+    let search_url = format!(
+        "{}?range=word&query={}",
+        dict.search_url(),
+        urlencoding::encode(reading)
+    );
+    let search = get_json(&search_url, dict.referer()).await?;
+    let items = extract_search_items(&search, max);
+
+    // Fetch every entry concurrently, then await the handles in search order so
+    // the grouped result keeps Naver's relevance ranking.
+    let handles: Vec<_> = items
+        .into_iter()
+        .map(|(id, head)| tokio::spawn(async move { fetch_entry(&id, head, dict).await }))
+        .collect();
+    let mut out = Vec::new();
+    for handle in handles {
+        if let Ok(Some(result)) = handle.await {
+            out.push(result);
+        }
+    }
+    Ok(out)
+}
+
 /// Look up a word in the given dictionary and return its Korean definition +
 /// pronunciation urls.
 pub async fn lookup(word: &str, dict: Dict) -> anyhow::Result<Option<NaverResult>> {
@@ -337,6 +437,68 @@ mod tests {
             ]}}}
         });
         assert_eq!(extract_headword(&search).as_deref(), Some("cheat"));
+    }
+
+    #[test]
+    fn extract_search_items_uses_kanji_surface_for_japanese() {
+        // 일한사전은 handleEntry가 읽기(かえる)라 동음이의어 구분이 안 된다.
+        // 한자 표기는 expKanji에 있고, 여러 표기는 "·"로 묶여 온다.
+        let search = serde_json::json!({
+            "searchResultMap": { "searchResultListMap": { "WORD": { "items": [
+                { "entryId": "1", "handleEntry": "かえる", "expKanji": "帰る·還る" },
+                { "entryId": 2, "handleEntry": "かえる", "expKanji": "変える" }
+            ]}}}
+        });
+        let items = extract_search_items(&search, 5);
+        assert_eq!(items.len(), 2);
+        // 첫 한자 표기를 클릭/표시·캐시 키로 쓴다(帰る·還る -> 帰る).
+        assert_eq!(items[0], ("1".to_string(), "帰る".to_string()));
+        // entryId가 숫자로 와도 문자열로 정규화된다.
+        assert_eq!(items[1], ("2".to_string(), "変える".to_string()));
+    }
+
+    #[test]
+    fn extract_search_items_dedups_by_headword() {
+        // 첫 한자 표기가 같은 항목은 한 번만 (帰る·還る / 帰る -> 帰る 하나).
+        let search = serde_json::json!({
+            "searchResultMap": { "searchResultListMap": { "WORD": { "items": [
+                { "entryId": "1", "expKanji": "帰る·還る" },
+                { "entryId": "2", "expKanji": "帰る" },
+                { "entryId": "3", "expKanji": "変える" }
+            ]}}}
+        });
+        let items = extract_search_items(&search, 5);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0], ("1".to_string(), "帰る".to_string()));
+        assert_eq!(items[1], ("3".to_string(), "変える".to_string()));
+    }
+
+    #[test]
+    fn extract_search_items_falls_back_to_reading_without_kanji() {
+        // 외래어 등 한자가 없으면 읽기(handleEntry)로 폴백한다.
+        let search = serde_json::json!({
+            "searchResultMap": { "searchResultListMap": { "WORD": { "items": [
+                { "entryId": "1", "handleEntry": "カット", "expKanji": "" }
+            ]}}}
+        });
+        let items = extract_search_items(&search, 5);
+        assert_eq!(items[0].1, "カット");
+    }
+
+    #[test]
+    fn extract_search_items_caps_at_max_and_skips_headless() {
+        let search = serde_json::json!({
+            "searchResultMap": { "searchResultListMap": { "WORD": { "items": [
+                { "entryId": "1", "expKanji": "帰る" },
+                { "entryId": "2" }, // 표제어 없음 → 건너뜀
+                { "entryId": "3", "expKanji": "返る" },
+                { "entryId": "4", "expKanji": "蛙" }
+            ]}}}
+        });
+        let items = extract_search_items(&search, 2);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].1, "帰る");
+        assert_eq!(items[1].1, "返る"); // headless 항목은 제외하고 채운다
     }
 
     #[test]
