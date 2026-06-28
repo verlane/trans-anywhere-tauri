@@ -100,6 +100,14 @@ function App() {
     setActiveIndex(-1);
   }, [suggestions]);
 
+  // Clearing the input drops the stale result so re-typing a fresh word doesn't
+  // flash the previously searched entry.
+  useEffect(() => {
+    if (query.trim() === "") {
+      setResult(null);
+    }
+  }, [query]);
+
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
