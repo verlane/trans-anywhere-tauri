@@ -20,12 +20,16 @@ pub struct Settings {
     /// Maximum number of suggestions to return.
     #[serde(default = "default_max_results")]
     pub suggest_max_results: usize,
-    /// Primary translation target (Enter), e.g. "en". Used by resolve_target.
+    /// Primary translation target (Enter), e.g. "ko". Used by resolve_target.
     #[serde(default = "default_translate_target")]
     pub translate_target: String,
     /// Secondary translation target (toggle shortcut), e.g. "ja".
     #[serde(default = "default_translate_target_alt")]
     pub translate_target_alt: String,
+    /// Language to fall back to when the input is already the chosen target
+    /// (translating into the same language is useless), e.g. "en".
+    #[serde(default = "default_translate_fallback")]
+    pub translate_fallback: String,
     /// Hide the window to the tray when minimized instead of staying on the taskbar.
     #[serde(default)]
     pub minimize_to_tray: bool,
@@ -77,10 +81,13 @@ fn default_max_results() -> usize {
     20
 }
 fn default_translate_target() -> String {
-    "en".into()
+    "ko".into()
 }
 fn default_translate_target_alt() -> String {
     "ja".into()
+}
+fn default_translate_fallback() -> String {
+    "en".into()
 }
 fn default_pron_volume() -> usize {
     MAX_PRON_VOLUME
@@ -105,6 +112,7 @@ impl Default for Settings {
             suggest_max_results: default_max_results(),
             translate_target: default_translate_target(),
             translate_target_alt: default_translate_target_alt(),
+            translate_fallback: default_translate_fallback(),
             minimize_to_tray: false,
             always_on_top: false,
             db_path: String::new(),
@@ -161,8 +169,9 @@ mod tests {
         assert_eq!(s.default_accent_ja, "us");
         assert_eq!(s.suggest_max_results, 20);
         assert!(!s.auto_play);
-        assert_eq!(s.translate_target, "en");
+        assert_eq!(s.translate_target, "ko");
         assert_eq!(s.translate_target_alt, "ja");
+        assert_eq!(s.translate_fallback, "en");
         assert!(!s.minimize_to_tray);
         assert!(!s.always_on_top);
         assert_eq!(s.pron_volume, 100);

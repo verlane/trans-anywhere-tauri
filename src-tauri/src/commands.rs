@@ -170,19 +170,14 @@ fn route(text: &str) -> Route {
     }
 }
 
-/// Pick the translation target language. `primary` is used on Enter, `secondary`
-/// on the toggle shortcut. If the chosen target equals the input language it is
-/// useless, so fall back to the other configured target (then "ko" as a last resort).
-fn resolve_target(input: &str, alt: bool, primary: &str, secondary: &str) -> String {
-    let (want, other) = if alt {
-        (secondary, primary)
-    } else {
-        (primary, secondary)
-    };
-    if want != input {
-        want.to_string()
-    } else if other != input {
-        other.to_string()
+/// Pick the translation target language for a chosen `target` (the Enter target
+/// or the toggle-shortcut target). Translating into the input's own language is
+/// useless, so fall back to `fallback` (then "ko" as a last resort).
+fn resolve_target(input: &str, target: &str, fallback: &str) -> String {
+    if input != target {
+        target.to_string()
+    } else if input != fallback {
+        fallback.to_string()
     } else {
         "ko".to_string()
     }
@@ -326,12 +321,12 @@ async fn translate_input(
     state: &State<'_, AppState>,
 ) -> Result<LookupResult, String> {
     let cfg = settings_snapshot(state);
-    let tl = resolve_target(
-        lang::detect(trimmed).code(),
-        alt,
-        &cfg.translate_target,
-        &cfg.translate_target_alt,
-    );
+    let target = if alt {
+        &cfg.translate_target_alt
+    } else {
+        &cfg.translate_target
+    };
+    let tl = resolve_target(lang::detect(trimmed).code(), target, &cfg.translate_fallback);
     let definition = google::translate(trimmed, "auto", &tl).await.map_err(err)?;
 
     // If the translation is a single dictionary word (e.g. 変える -> "change"),
@@ -739,19 +734,21 @@ mod tests {
     }
 
     #[test]
-    fn resolve_target_korean_uses_primary_then_secondary() {
-        // 한국어 입력: Enter -> 기본(en), 토글 -> 보조(ja).
-        assert_eq!(resolve_target("ko", false, "en", "ja"), "en");
-        assert_eq!(resolve_target("ko", true, "en", "ja"), "ja");
+    fn resolve_target_uses_chosen_target() {
+        // 기본 번역 언어(ko): 영어/일본어 입력은 한국어로.
+        assert_eq!(resolve_target("en", "ko", "en"), "ko");
+        assert_eq!(resolve_target("ja", "ko", "en"), "ko");
+        // 보조 번역 언어(ja): 영어/한국어 입력은 일본어로.
+        assert_eq!(resolve_target("en", "ja", "en"), "ja");
+        assert_eq!(resolve_target("ko", "ja", "en"), "ja");
     }
 
     #[test]
-    fn resolve_target_avoids_input_language() {
-        // 일본어 입력 토글: 보조(ja)가 자기 자신이라 기본(en)으로 회피.
-        assert_eq!(resolve_target("ja", true, "en", "ja"), "en");
-        // 일본어 입력 기본: 기본(en)은 일본어가 아니므로 그대로.
-        assert_eq!(resolve_target("ja", false, "en", "ja"), "en");
-        // 영어 입력 기본: 기본(en)이 자기 자신이라 보조(ja)로 회피.
-        assert_eq!(resolve_target("en", false, "en", "ja"), "ja");
+    fn resolve_target_falls_back_when_input_is_the_target() {
+        // 입력이 곧 목표 언어면 번역이 무의미하므로 대체 언어(en)로.
+        assert_eq!(resolve_target("ko", "ko", "en"), "en");
+        assert_eq!(resolve_target("ja", "ja", "en"), "en");
+        // 목표와 대체가 모두 입력과 같으면 최후로 ko.
+        assert_eq!(resolve_target("en", "en", "en"), "ko");
     }
 }

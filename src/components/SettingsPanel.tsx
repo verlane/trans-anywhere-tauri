@@ -295,15 +295,21 @@ export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps)
         />
 
         <LangRow
-          label="기본 번역 대상"
+          label="기본 번역 언어 (Enter)"
           value={settings.translateTarget}
           onChange={(code) => update({ translateTarget: code })}
         />
 
         <LangRow
-          label="보조 번역 대상 (토글)"
+          label="보조 번역 언어 (Ctrl+Enter)"
           value={settings.translateTargetAlt}
           onChange={(code) => update({ translateTargetAlt: code })}
+        />
+
+        <LangRow
+          label="대체 언어 (입력이 번역 언어와 같을 때)"
+          value={settings.translateFallback}
+          onChange={(code) => update({ translateFallback: code })}
         />
 
         <div className="settings__row settings__row--stack">

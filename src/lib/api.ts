@@ -40,6 +40,8 @@ export interface Settings {
   translateTarget: string;
   /** Secondary translation target (Ctrl+Enter). */
   translateTargetAlt: string;
+  /** Language used when the input is already the chosen target. */
+  translateFallback: string;
   minimizeToTray: boolean;
   alwaysOnTop: boolean;
   dbPath: string;
@@ -62,6 +64,7 @@ interface RawSettings {
   suggest_max_results: number;
   translate_target: string;
   translate_target_alt: string;
+  translate_fallback: string;
   minimize_to_tray: boolean;
   always_on_top: boolean;
   db_path: string;
@@ -109,6 +112,7 @@ export async function getSettings(): Promise<Settings> {
     suggestMaxResults: raw.suggest_max_results,
     translateTarget: raw.translate_target,
     translateTargetAlt: raw.translate_target_alt,
+    translateFallback: raw.translate_fallback,
     minimizeToTray: raw.minimize_to_tray,
     alwaysOnTop: raw.always_on_top,
     dbPath: raw.db_path,
@@ -129,6 +133,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
     suggest_max_results: settings.suggestMaxResults,
     translate_target: settings.translateTarget,
     translate_target_alt: settings.translateTargetAlt,
+    translate_fallback: settings.translateFallback,
     minimize_to_tray: settings.minimizeToTray,
     always_on_top: settings.alwaysOnTop,
     db_path: settings.dbPath,
