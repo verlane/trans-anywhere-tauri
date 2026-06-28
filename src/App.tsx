@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { lookup, minimizeWindow, type Accent, type LookupResult } from "./lib/api";
 import { resolveEscAction } from "./lib/esc";
+import { prioritizeRecent } from "./lib/rankSuggest";
 import { rowMove, type ChipRect } from "./lib/chipGrid";
 import { resolveActionKey, type ActionKey } from "./lib/actionKeys";
 import { isTranslateAltKey, isNewlineKey } from "./lib/hotkey";
@@ -89,16 +90,21 @@ function App() {
 
   const suggestEnabled = !dismissed && isEnglishWordFragment(query);
   const suggestions = useSuggest(query, suggestEnabled, settings.suggestMinLength);
-  const showSuggest = suggestEnabled && suggestions.length > 0;
+  // Surface previously searched words at the top of the autocomplete dropdown.
+  const rankedSuggestions = useMemo(
+    () => prioritizeRecent(query, suggestions, history.items),
+    [query, suggestions, history.items],
+  );
+  const showSuggest = suggestEnabled && rankedSuggestions.length > 0;
   // Recent-search chips replace the result pane on the empty screen and accept
   // the same keyboard nav as the autocomplete dropdown.
   const showChips = query.trim() === "" && !loading && history.items.length > 0;
   // The currently navigable list (autocomplete dropdown or recent chips).
-  const navItems = showSuggest ? suggestions : showChips ? history.items : [];
+  const navItems = showSuggest ? rankedSuggestions : showChips ? history.items : [];
 
   useEffect(() => {
     setActiveIndex(-1);
-  }, [suggestions]);
+  }, [rankedSuggestions]);
 
   // Clearing the input drops the stale result so re-typing a fresh word doesn't
   // flash the previously searched entry.
@@ -515,7 +521,7 @@ function App() {
             </button>
           )}
           {showSuggest && (
-            <SuggestList items={suggestions} activeIndex={activeIndex} onPick={pickWord} />
+            <SuggestList items={rankedSuggestions} activeIndex={activeIndex} onPick={pickWord} />
           )}
         </div>
         <button
