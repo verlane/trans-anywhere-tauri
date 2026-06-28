@@ -79,12 +79,30 @@ function hasNonAscii(s: string): boolean {
   return [...s].some((c) => c.charCodeAt(0) > 127);
 }
 
-/** Regex for one keyword. English matches on word boundaries; others as substrings. */
-function keywordRegex(kw: string): RegExp {
+/**
+ * Body for an inflected English keyword: also match the plural / 3rd-person
+ * forms (-s / -es / -ies). -ed / -ing are deliberately left out — those are the
+ * conjugation forms, colored separately by buildColorMap.
+ */
+function inflectedBody(kw: string): string {
+  // consonant + y -> -ies (carry -> carries); keep the bare form too.
+  if (/[^aeiou]y$/i.test(kw)) {
+    return `(?:${escapeRegExp(kw)}|${escapeRegExp(kw.slice(0, -1))}ies)`;
+  }
+  return `${escapeRegExp(kw)}(?:es|s)?`;
+}
+
+/**
+ * Regex for one keyword. English matches on word boundaries; others as
+ * substrings. When `inflect` is set, English keywords also match their plural /
+ * 3rd-person forms (the conjugation forms keep their own color).
+ */
+export function keywordRegex(kw: string, inflect: boolean): RegExp {
   if (hasNonAscii(kw)) {
     return new RegExp(escapeRegExp(kw), "g");
   }
-  return new RegExp(`(?<![A-Za-z'])${escapeRegExp(kw)}(?![A-Za-z'])`, "gi");
+  const body = inflect ? inflectedBody(kw) : escapeRegExp(kw);
+  return new RegExp(`(?<![A-Za-z'])${body}(?![A-Za-z'])`, "gi");
 }
 
 interface Span {
@@ -97,7 +115,7 @@ interface Span {
 function computeSpans(text: string, colors: Map<string, string>): Span[] {
   const spans: Span[] = [];
   for (const [kw, cls] of colors) {
-    const re = keywordRegex(kw);
+    const re = keywordRegex(kw, cls === "kw");
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null) {
       if (m[0].length === 0) {
