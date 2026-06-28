@@ -213,17 +213,6 @@ fn build_definition(entry: &Value) -> String {
     out.trim().to_string()
 }
 
-/// Pull the canonical headword (`handleEntry`) from the first search hit. Naver
-/// resolves inflected forms to their base word here (cheats -> cheat), so it is
-/// used as the cache key. Returns `None` when the field is absent or empty.
-fn extract_headword(search: &Value) -> Option<String> {
-    let head = search
-        .pointer("/searchResultMap/searchResultListMap/WORD/items/0/handleEntry")
-        .and_then(Value::as_str)
-        .map(clean)?;
-    (!head.is_empty()).then_some(head)
-}
-
 /// The headword shown for a Jako search item. `handleEntry` is only the reading
 /// (かえる for every homophone), so prefer the kanji surface in `expKanji`, taking
 /// the first of any "·"-joined variants (帰る·還る -> 帰る) as the clickable/cache
@@ -334,19 +323,24 @@ pub async fn lookup(word: &str, dict: Dict) -> anyhow::Result<Option<NaverResult
     );
     let search = get_json(&search_url, dict.referer()).await?;
 
-    let entry_id = search
-        .pointer("/searchResultMap/searchResultListMap/WORD/items/0/entryId")
-        .and_then(|v| {
-            v.as_str()
-                .map(String::from)
-                .or_else(|| v.as_i64().map(|n| n.to_string()))
-        });
+    // Resolve from the first search hit. For Enko, `item_headword` falls back to
+    // `handleEntry` (the base word, cheats -> cheat); for Jako it prefers the
+    // kanji surface (帰った -> 帰る) over the reading, matching the group path.
+    let first = search.pointer("/searchResultMap/searchResultListMap/WORD/items/0");
+
+    let entry_id = first.and_then(|i| i.get("entryId")).and_then(|v| {
+        v.as_str()
+            .map(String::from)
+            .or_else(|| v.as_i64().map(|n| n.to_string()))
+    });
 
     let Some(entry_id) = entry_id else {
         return Ok(None);
     };
 
-    let headword = extract_headword(&search).unwrap_or_else(|| word.to_string());
+    let headword = first
+        .and_then(item_headword)
+        .unwrap_or_else(|| word.to_string());
 
     let entry_url = format!("{}?entryId={entry_id}", dict.entry_url());
     let detail = get_json(&entry_url, dict.referer()).await?;
@@ -429,14 +423,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extract_headword_reads_handle_entry() {
-        // 네이버 검색은 굴절형을 정규 표제어로 돌려준다: cheats -> cheat.
-        let search = serde_json::json!({
-            "searchResultMap": { "searchResultListMap": { "WORD": { "items": [
-                { "handleEntry": "cheat", "entryId": "abc" }
-            ]}}}
-        });
-        assert_eq!(extract_headword(&search).as_deref(), Some("cheat"));
+    fn item_headword_falls_back_to_handle_entry_for_english() {
+        // 영어 항목은 expKanji가 없으므로 handleEntry(정규 표제어)로 폴백한다: cheats -> cheat.
+        let item = serde_json::json!({ "handleEntry": "cheat", "entryId": "abc" });
+        assert_eq!(item_headword(&item).as_deref(), Some("cheat"));
+    }
+
+    #[test]
+    fn item_headword_prefers_kanji_over_reading() {
+        // 일본어 항목은 읽기(handleEntry)가 아니라 한자 표기(expKanji)를 표제어로 쓴다.
+        let item = serde_json::json!({ "handleEntry": "かえる", "expKanji": "帰る·還る" });
+        assert_eq!(item_headword(&item).as_deref(), Some("帰る"));
     }
 
     #[test]
@@ -502,13 +499,9 @@ mod tests {
     }
 
     #[test]
-    fn extract_headword_none_when_absent() {
-        let search = serde_json::json!({
-            "searchResultMap": { "searchResultListMap": { "WORD": { "items": [
-                { "entryId": "abc" }
-            ]}}}
-        });
-        assert_eq!(extract_headword(&search), None);
+    fn item_headword_none_when_absent() {
+        let item = serde_json::json!({ "entryId": "abc" });
+        assert_eq!(item_headword(&item), None);
     }
 
     #[test]

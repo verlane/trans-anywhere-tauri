@@ -124,6 +124,19 @@ fn build_group_result(reading: &str, entries: Vec<GroupEntry>, source: &str) -> 
     }
 }
 
+/// The title shown for a dictionary result. A searched inflected form displays
+/// its canonical headword instead of the typed text: English "annoys" -> "annoy",
+/// Japanese 帰った -> 帰る (the kanji surface Naver resolved to). Falls back to the
+/// input when Naver omitted a headword.
+fn display_title(word: &str, headword: &str) -> String {
+    let head = headword.trim();
+    if head.is_empty() {
+        word.to_string()
+    } else {
+        head.to_string()
+    }
+}
+
 /// Playback mode for a dictionary entry: recorded MP3 if a slot exists, else TTS.
 fn pron_mode(has_recording: bool) -> &'static str {
     if has_recording {
@@ -381,9 +394,10 @@ async fn lookup_dict_word(
                 let db_path = state.db_path.lock().map(|p| p.clone()).unwrap_or_default();
                 spawn_pron_backfill(db_path, canonical, dict, sl);
             }
+            let title = display_title(&word, &entry.word);
             return Ok(LookupResult::new(
                 "word",
-                word,
+                title,
                 entry.definition,
                 "cache",
                 sl,
@@ -400,6 +414,7 @@ async fn lookup_dict_word(
     // 3. Cache under the canonical headword Naver resolved to, and record the
     //    inflected-form alias so the next lookup of the form skips Naver.
     let hw = result.cache_key(&key);
+    let title = display_title(&word, &hw);
     let definition = result.definition.clone();
     let hw_for_def = hw.clone();
     with_db(state, move |conn| {
@@ -433,7 +448,7 @@ async fn lookup_dict_word(
 
     Ok(LookupResult::new(
         "word",
-        word,
+        title,
         result.definition,
         "naver",
         sl,
@@ -696,6 +711,31 @@ mod tests {
         // 앞에 빈 줄이 있어도 첫 내용 줄을 집는다.
         assert_eq!(gloss_line("\n  돌아가다\n1. ..."), "돌아가다");
         assert_eq!(gloss_line(""), "");
+    }
+
+    #[test]
+    fn display_title_uses_headword_for_inflected_english() {
+        // 굴절형 입력이라도 정규 표제어를 제목으로 보여준다: annoys -> annoy.
+        assert_eq!(display_title("annoys", "annoy"), "annoy");
+    }
+
+    #[test]
+    fn display_title_uses_kanji_for_japanese() {
+        // 일본어 굴절형은 한자 표제어로: 帰った -> 帰る.
+        assert_eq!(display_title("帰った", "帰る"), "帰る");
+    }
+
+    #[test]
+    fn display_title_same_when_not_inflected() {
+        assert_eq!(display_title("annoy", "annoy"), "annoy");
+        assert_eq!(display_title("辞書", "辞書"), "辞書");
+    }
+
+    #[test]
+    fn display_title_keeps_input_when_headword_empty() {
+        // 네이버가 표제어를 안 주면 입력어로 폴백한다.
+        assert_eq!(display_title("foo", ""), "foo");
+        assert_eq!(display_title("bar", "   "), "bar");
     }
 
     #[test]
