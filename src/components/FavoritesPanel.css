@@ -67,6 +67,58 @@
   line-height: 1.6;
 }
 
+.fav__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.fav__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: var(--font-body);
+  font-size: var(--text-small);
+  color: var(--color-ink-faint);
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: 99px;
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+  transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease),
+    background var(--duration) var(--ease);
+}
+.fav__chip:hover {
+  color: var(--color-ink);
+}
+
+.fav__chip--active {
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+  border-color: transparent;
+}
+
+.fav__chip-count {
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.fav__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.fav__section-head {
+  font-size: var(--text-section);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+  margin-top: var(--space-2);
+}
+
 .fav__list {
   display: flex;
   flex-direction: column;
