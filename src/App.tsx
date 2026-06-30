@@ -17,6 +17,7 @@ import { RecentChips } from "./components/RecentChips";
 import { FavoritesPanel } from "./components/FavoritesPanel";
 import { WordTooltip } from "./components/WordTooltip";
 import { useFavorites } from "./hooks/useFavorites";
+import { glossLine } from "./lib/favorites";
 import { useWordPreview } from "./hooks/useWordPreview";
 import { useNavStack } from "./hooks/useNavStack";
 import type { NavEntry } from "./lib/navStack";
@@ -252,7 +253,7 @@ function App() {
       }
       case "toggle-favorite":
         if (result.text) {
-          favorites.toggle(result.text);
+          favorites.toggle(result.text, glossLine(result.definition));
         }
         break;
       case "copy-result":
@@ -574,7 +575,9 @@ function App() {
           onWordHover={wordPreview.onEnter}
           onWordLeave={wordPreview.onLeave}
           isFavorite={!!result && favorites.has(result.text)}
-          onToggleFavorite={result ? () => favorites.toggle(result.text) : undefined}
+          onToggleFavorite={
+            result ? () => favorites.toggle(result.text, glossLine(result.definition)) : undefined
+          }
           canNavBack={nav.canBack}
           canNavForward={nav.canForward}
           onNavBack={navBack}

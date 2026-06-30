@@ -1,9 +1,10 @@
 import { detectLang, type Lang } from "./lang";
+import type { FavoriteItem } from "./favorites";
 
 export interface FavoriteGroup {
   lang: Lang;
   label: string;
-  items: string[];
+  items: FavoriteItem[];
 }
 
 /** Fixed section order and display labels for the word book. */
@@ -15,18 +16,18 @@ const SECTIONS: ReadonlyArray<{ lang: Lang; label: string }> = [
 ];
 
 /**
- * Bucket saved words by detected language, preserving each word's original
+ * Bucket saved words by their detected language, preserving each word's original
  * (most-recent-first) order. Empty sections are dropped.
  */
-export function groupFavorites(items: string[]): FavoriteGroup[] {
-  const buckets = new Map<Lang, string[]>();
-  for (const term of items) {
-    const lang = detectLang(term);
+export function groupFavorites(items: FavoriteItem[]): FavoriteGroup[] {
+  const buckets = new Map<Lang, FavoriteItem[]>();
+  for (const item of items) {
+    const lang = detectLang(item.term);
     const bucket = buckets.get(lang);
     if (bucket) {
-      bucket.push(term);
+      bucket.push(item);
     } else {
-      buckets.set(lang, [term]);
+      buckets.set(lang, [item]);
     }
   }
   return SECTIONS.flatMap(({ lang, label }) => {
