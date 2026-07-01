@@ -190,11 +190,11 @@ fn build_means_from_entry(means: &[Value]) -> String {
     block
 }
 
-/// The search-side `meansCollector` arrives as either a JSON array or a
-/// JSON-encoded string; normalize both to a list of part-of-speech groups.
-fn collector_groups(mc: &Value) -> Vec<Value> {
-    match mc {
-        Value::Array(groups) => groups.clone(),
+/// Several Naver fields (`meansCollector`, `related_example`) arrive as either a
+/// JSON array or a JSON-encoded string; normalize both to a list of items.
+fn json_array(v: &Value) -> Vec<Value> {
+    match v {
+        Value::Array(items) => items.clone(),
         Value::String(s) => serde_json::from_str(s).unwrap_or_default(),
         _ => Vec::new(),
     }
@@ -206,7 +206,7 @@ fn collector_groups(mc: &Value) -> Vec<Value> {
 fn build_means_from_collector(mc: &Value) -> String {
     let mut block = String::new();
     let mut no = 1;
-    for group in collector_groups(mc) {
+    for group in json_array(mc) {
         let Some(means) = group.get("means").and_then(Value::as_array) else {
             continue;
         };
@@ -244,6 +244,53 @@ fn build_means_block(entry: &Value, means_collector: Option<&Value>) -> String {
     means
         .map(|ms| build_means_from_entry(ms))
         .unwrap_or_default()
+}
+
+/// Whether any sense already carries an example, in the entry detail or the
+/// search `meansCollector`. Used to decide if the `related_example` fallback
+/// is needed (e.g. "seashore", whose senses have no example at all).
+fn has_any_example(entry: &Value, means_collector: Option<&Value>) -> bool {
+    let entry_has = entry
+        .get("means")
+        .and_then(Value::as_array)
+        .is_some_and(|ms| {
+            ms.iter().any(|m| {
+                m.get("examples")
+                    .and_then(Value::as_array)
+                    .is_some_and(|e| !e.is_empty())
+            })
+        });
+    if entry_has {
+        return true;
+    }
+    means_collector.is_some_and(|mc| {
+        json_array(mc).iter().any(|g| {
+            g.get("means").and_then(Value::as_array).is_some_and(|ms| {
+                ms.iter().any(|m| {
+                    m.get("exampleOri")
+                        .and_then(Value::as_str)
+                        .is_some_and(|s| !s.trim().is_empty())
+                })
+            })
+        })
+    })
+}
+
+/// Append up to `MAX_EXAMPLES_PER_MEAN` representative examples from the entry's
+/// `related_example` (each with `sourceExample` + `sourceTranslation`), indented
+/// like the meaning examples. Used only when no sense carried its own example.
+fn append_related_examples(block: &mut String, entry: &Value) {
+    let Some(related) = entry.get("related_example") else {
+        return;
+    };
+    for ex in json_array(related).iter().take(MAX_EXAMPLES_PER_MEAN) {
+        if let Some(s) = ex.get("sourceExample").and_then(Value::as_str) {
+            append(block, s, "\n  ");
+        }
+        if let Some(t) = ex.get("sourceTranslation").and_then(Value::as_str) {
+            append(block, t, "\n  ");
+        }
+    }
 }
 
 /// Build the readable definition block from the entry detail JSON.
@@ -303,7 +350,12 @@ fn build_definition(entry: &Value, means_collector: Option<&Value>) -> String {
     // Numbered meanings. When the entry detail carries no gloss for any sense
     // (e.g. "recap", a cross-reference headword), fall back to the search-side
     // `meansCollector`, which still holds the gloss + examples.
-    let means_block = build_means_block(entry, means_collector);
+    let mut means_block = build_means_block(entry, means_collector);
+    // When no sense carried an example (e.g. "seashore"), pull representative
+    // examples from the entry's `related_example` so the result isn't bare.
+    if !has_any_example(entry, means_collector) {
+        append_related_examples(&mut means_block, entry);
+    }
     append(&mut out, &means_block, "\n");
 
     out.trim().to_string()
@@ -783,6 +835,45 @@ mod tests {
         assert!(
             def.contains("1. 요약하다"),
             "문자열 meansCollector 파싱 실패: {def}"
+        );
+    }
+
+    #[test]
+    fn build_definition_falls_back_to_related_example_when_no_examples() {
+        // seashore류: 뜻은 있지만 means/meansCollector 어디에도 예문이 없다.
+        // 이때 entry.related_example에서 대표 예문+번역을 가져와 붙인다.
+        let entry = serde_json::json!({
+            "members": [{ "show_full_name": "seashore" }],
+            "means": [{ "origin_mean": "해안", "examples": [] }],
+            "related_example": [{
+                "sourceExample": "We spent the whole afternoon walking along the seashore.",
+                "sourceTranslation": "우리는 오후 내내 해안을 따라 걸었다."
+            }]
+        });
+        let def = build_definition(&entry, None);
+        assert!(def.contains("1. 해안"), "뜻 누락: {def}");
+        assert!(
+            def.contains("We spent the whole afternoon"),
+            "예문 폴백 누락: {def}"
+        );
+        assert!(def.contains("우리는 오후 내내"), "번역 누락: {def}");
+    }
+
+    #[test]
+    fn build_definition_skips_related_example_when_sense_has_examples() {
+        // 이미 예문이 있으면 related_example로 중복 추가하지 않는다(회귀 방지).
+        let entry = serde_json::json!({
+            "means": [{
+                "origin_mean": "사랑",
+                "examples": [{ "origin_example": "love song", "translations": [{ "origin_translation": "사랑 노래" }] }]
+            }],
+            "related_example": [{ "sourceExample": "DUPLICATE_EXAMPLE", "sourceTranslation": "중복" }]
+        });
+        let def = build_definition(&entry, None);
+        assert!(def.contains("love song"), "본래 예문 누락: {def}");
+        assert!(
+            !def.contains("DUPLICATE_EXAMPLE"),
+            "예문 있는데 related가 중복 추가됨: {def}"
         );
     }
 
