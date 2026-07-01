@@ -128,8 +128,126 @@ fn pron_label(pron_type: &str) -> &'static str {
     }
 }
 
+/// How many example sentences to show per meaning. Naver often carries several;
+/// v1 showed only the first, but a bounded few keep results informative without
+/// flooding the panel.
+const MAX_EXAMPLES_PER_MEAN: usize = 2;
+
+/// The Korean gloss for a sense: `origin_mean`, falling back to `show_mean`.
+/// Some headwords ("recap") leave both empty and carry meaning only via examples,
+/// so an empty return is expected and handled by the caller.
+fn meaning_gloss(mean: &Value) -> &str {
+    for key in ["origin_mean", "show_mean"] {
+        if let Some(s) = mean.get(key).and_then(Value::as_str) {
+            if !s.trim().is_empty() {
+                return s;
+            }
+        }
+    }
+    ""
+}
+
+/// Append up to `MAX_EXAMPLES_PER_MEAN` examples (with their first translation)
+/// of a sense, each indented under the meaning line.
+fn append_examples(block: &mut String, mean: &Value) {
+    let Some(examples) = mean.get("examples").and_then(Value::as_array) else {
+        return;
+    };
+    for ex in examples.iter().take(MAX_EXAMPLES_PER_MEAN) {
+        if let Some(s) = ex.get("origin_example").and_then(Value::as_str) {
+            append(block, s, "\n  ");
+        }
+        if let Some(t) = ex
+            .pointer("/translations/0/origin_translation")
+            .and_then(Value::as_str)
+        {
+            append(block, t, "\n  ");
+        }
+    }
+}
+
+/// Numbered meanings straight from the entry detail: each sense's gloss plus a
+/// bounded set of examples. A sense with no gloss but with examples is still kept.
+fn build_means_from_entry(means: &[Value]) -> String {
+    let mut block = String::new();
+    let mut no = 1;
+    for m in means {
+        let gloss = meaning_gloss(m);
+        let has_examples = m
+            .get("examples")
+            .and_then(Value::as_array)
+            .is_some_and(|e| !e.is_empty());
+        if gloss.is_empty() && !has_examples {
+            continue;
+        }
+        if !gloss.is_empty() {
+            let prefix = if no == 1 { "\n" } else { "\n\n" };
+            append(&mut block, &format!("{no}. {gloss}"), prefix);
+            no += 1;
+        }
+        append_examples(&mut block, m);
+    }
+    block
+}
+
+/// The search-side `meansCollector` arrives as either a JSON array or a
+/// JSON-encoded string; normalize both to a list of part-of-speech groups.
+fn collector_groups(mc: &Value) -> Vec<Value> {
+    match mc {
+        Value::Array(groups) => groups.clone(),
+        Value::String(s) => serde_json::from_str(s).unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+/// Numbered meanings rebuilt from the search `meansCollector`, used when the entry
+/// detail carries no gloss (e.g. "recap", a cross-reference to "recapitulate").
+/// Each collector item holds its gloss in `value` and one example pair.
+fn build_means_from_collector(mc: &Value) -> String {
+    let mut block = String::new();
+    let mut no = 1;
+    for group in collector_groups(mc) {
+        let Some(means) = group.get("means").and_then(Value::as_array) else {
+            continue;
+        };
+        for m in means {
+            let value = m.get("value").and_then(Value::as_str).unwrap_or("");
+            if clean(value).is_empty() {
+                continue;
+            }
+            let prefix = if no == 1 { "\n" } else { "\n\n" };
+            append(&mut block, &format!("{no}. {value}"), prefix);
+            no += 1;
+            if let Some(ex) = m.get("exampleOri").and_then(Value::as_str) {
+                append(&mut block, ex, "\n  ");
+            }
+            if let Some(tr) = m.get("exampleTrans").and_then(Value::as_str) {
+                append(&mut block, tr, "\n  ");
+            }
+        }
+    }
+    block
+}
+
+/// Build the numbered-meaning block, preferring the entry detail but falling back
+/// to the search `meansCollector` when the entry carries no gloss for any sense.
+fn build_means_block(entry: &Value, means_collector: Option<&Value>) -> String {
+    let means = entry.get("means").and_then(Value::as_array);
+    let has_gloss = means.is_some_and(|ms| ms.iter().any(|m| !meaning_gloss(m).is_empty()));
+    if !has_gloss {
+        if let Some(block) = means_collector.map(build_means_from_collector) {
+            if !block.is_empty() {
+                return block;
+            }
+        }
+    }
+    means
+        .map(|ms| build_means_from_entry(ms))
+        .unwrap_or_default()
+}
+
 /// Build the readable definition block from the entry detail JSON.
-fn build_definition(entry: &Value) -> String {
+fn build_definition(entry: &Value, means_collector: Option<&Value>) -> String {
     let mut out = String::new();
 
     if let Some(primary) = entry.get("primary_mean").and_then(Value::as_str) {
@@ -182,33 +300,11 @@ fn build_definition(entry: &Value) -> String {
         append(&mut out, tenses.trim_start_matches(" - "), "\n");
     }
 
-    // Numbered meanings with the first example and its translation.
-    if let Some(means) = entry.get("means").and_then(Value::as_array) {
-        let mut block = String::new();
-        let mut no = 1;
-        for m in means {
-            let origin = m.get("origin_mean").and_then(Value::as_str).unwrap_or("");
-            if origin.is_empty() {
-                continue;
-            }
-            let prefix = if no == 1 { "\n" } else { "\n\n" };
-            append(&mut block, &format!("{no}. {origin}"), prefix);
-            if let Some(ex) = m
-                .pointer("/examples/0/origin_example")
-                .and_then(Value::as_str)
-            {
-                append(&mut block, ex, "\n  ");
-            }
-            if let Some(tr) = m
-                .pointer("/examples/0/translations/0/origin_translation")
-                .and_then(Value::as_str)
-            {
-                append(&mut block, tr, "\n  ");
-            }
-            no += 1;
-        }
-        append(&mut out, &block, "\n");
-    }
+    // Numbered meanings. When the entry detail carries no gloss for any sense
+    // (e.g. "recap", a cross-reference headword), fall back to the search-side
+    // `meansCollector`, which still holds the gloss + examples.
+    let means_block = build_means_block(entry, means_collector);
+    append(&mut out, &means_block, "\n");
 
     out.trim().to_string()
 }
@@ -269,7 +365,7 @@ async fn fetch_entry(entry_id: &str, headword: String, dict: Dict) -> Option<Nav
     let entry_url = format!("{}?entryId={entry_id}", dict.entry_url());
     let detail = get_json(&entry_url, dict.referer()).await.ok()?;
     let entry = detail.get("entry").unwrap_or(&Value::Null);
-    let definition = build_definition(entry);
+    let definition = build_definition(entry, None);
     if definition.is_empty() {
         return None;
     }
@@ -342,11 +438,13 @@ pub async fn lookup(word: &str, dict: Dict) -> anyhow::Result<Option<NaverResult
         .and_then(item_headword)
         .unwrap_or_else(|| word.to_string());
 
+    let means_collector = first.and_then(|i| i.get("meansCollector"));
+
     let entry_url = format!("{}?entryId={entry_id}", dict.entry_url());
     let detail = get_json(&entry_url, dict.referer()).await?;
     let entry = detail.get("entry").unwrap_or(&Value::Null);
 
-    let definition = build_definition(entry);
+    let definition = build_definition(entry, means_collector);
     if definition.is_empty() {
         return Ok(None);
     }
@@ -550,7 +648,7 @@ mod tests {
             "members": [{ "show_full_name": "愛" }],
             "means": [{ "origin_mean": "사랑" }]
         });
-        let def = build_definition(&entry);
+        let def = build_definition(&entry, None);
         assert!(def.contains("愛 [あい]"), "def was: {def}");
     }
 
@@ -567,11 +665,125 @@ mod tests {
                 }]
             }]
         });
-        let def = build_definition(&entry);
+        let def = build_definition(&entry, None);
         assert!(def.contains("사서, 사전"));
         assert!(def.contains("じしょ"));
         assert!(def.contains("1. 사서(辭書); 사전."));
         assert!(def.contains("辞書を引く"));
+    }
+
+    #[test]
+    fn build_definition_keeps_example_when_meaning_gloss_is_empty() {
+        // "recap"류 표제어: Naver가 뜻 글로스를 origin_mean/show_mean 어디에도
+        // 채우지 않고 예문으로만 의미를 전달한다. 뜻이 비었다고 sense를 통째로
+        // 버리면 그 안의 예문/번역까지 사라진다 -> 예문은 반드시 살려야 한다.
+        let entry = serde_json::json!({
+            "members": [{ "show_full_name": "recap" }],
+            "means": [{
+                "origin_mean": serde_json::Value::Null,
+                "show_mean": "",
+                "examples": [{
+                    "origin_example": "Let me just recap on what we've decided so far.",
+                    "translations": [{ "origin_translation": "지금까지 우리가 결정한 내용의 개요를 말씀드리겠습니다." }]
+                }]
+            }]
+        });
+        let def = build_definition(&entry, None);
+        assert!(def.contains("Let me just recap"), "예문 누락: {def}");
+        assert!(def.contains("지금까지 우리가 결정한"), "번역 누락: {def}");
+    }
+
+    #[test]
+    fn build_definition_falls_back_to_show_mean_for_gloss() {
+        // origin_mean이 비면 show_mean을 뜻 라벨로 쓴다.
+        let entry = serde_json::json!({
+            "means": [{
+                "origin_mean": serde_json::Value::Null,
+                "show_mean": "요약하다",
+                "examples": []
+            }]
+        });
+        let def = build_definition(&entry, None);
+        assert!(def.contains("1. 요약하다"), "show_mean 폴백 실패: {def}");
+    }
+
+    #[test]
+    fn build_definition_includes_multiple_examples_per_meaning() {
+        // 한 뜻에 예문이 여러 개면 상한(MAX_EXAMPLES_PER_MEAN)까지 보여준다.
+        let entry = serde_json::json!({
+            "means": [{
+                "origin_mean": "요약하다",
+                "examples": [
+                    { "origin_example": "first example", "translations": [{ "origin_translation": "첫 번째" }] },
+                    { "origin_example": "second example", "translations": [{ "origin_translation": "두 번째" }] }
+                ]
+            }]
+        });
+        let def = build_definition(&entry, None);
+        assert!(def.contains("first example"), "첫 예문 누락: {def}");
+        assert!(def.contains("second example"), "둘째 예문 누락: {def}");
+    }
+
+    #[test]
+    fn build_definition_uses_means_collector_when_entry_lacks_gloss() {
+        // recap류: entry.means에 예문만 있고 뜻(글로스)이 하나도 없다. 이때 search의
+        // meansCollector에서 뜻(value)+예문을 가져와 채운다.
+        let entry = serde_json::json!({
+            "members": [{ "show_full_name": "recap" }],
+            "means": [{
+                "origin_mean": serde_json::Value::Null,
+                "examples": [{ "origin_example": "old example", "translations": [{ "origin_translation": "옛 예문" }] }]
+            }]
+        });
+        let mc = serde_json::json!([{
+            "partOfSpeech": "동사",
+            "means": [{
+                "order": "1",
+                "value": "(=<span class=\"related_word\">recapitulate</span>)",
+                "exampleOri": "Let me just recap on what we've decided.",
+                "exampleTrans": "지금까지 결정한 내용을 요약할게요."
+            }]
+        }]);
+        let def = build_definition(&entry, Some(&mc));
+        assert!(
+            def.contains("1. (=recapitulate)"),
+            "meansCollector 뜻 누락: {def}"
+        );
+        assert!(
+            def.contains("지금까지 결정한 내용을 요약"),
+            "meansCollector 번역 누락: {def}"
+        );
+    }
+
+    #[test]
+    fn build_definition_prefers_entry_gloss_over_collector() {
+        // entry.means에 뜻이 있으면 meansCollector는 무시하고 entry를 쓴다(회귀 방지).
+        let entry = serde_json::json!({
+            "means": [{ "origin_mean": "사랑", "examples": [{ "origin_example": "love you" }] }]
+        });
+        let mc = serde_json::json!([{ "partOfSpeech": "명사", "means": [{ "order": "1", "value": "WRONG_FALLBACK" }] }]);
+        let def = build_definition(&entry, Some(&mc));
+        assert!(def.contains("1. 사랑"), "entry 뜻 우선 실패: {def}");
+        assert!(
+            !def.contains("WRONG_FALLBACK"),
+            "meansCollector가 잘못 끼어듦: {def}"
+        );
+    }
+
+    #[test]
+    fn build_definition_parses_string_means_collector() {
+        // meansCollector가 JSON 문자열로 와도 파싱한다.
+        let entry = serde_json::json!({
+            "means": [{ "origin_mean": serde_json::Value::Null, "examples": [{}] }]
+        });
+        let mc = serde_json::Value::String(
+            r#"[{"partOfSpeech":"동사","means":[{"order":"1","value":"요약하다"}]}]"#.to_string(),
+        );
+        let def = build_definition(&entry, Some(&mc));
+        assert!(
+            def.contains("1. 요약하다"),
+            "문자열 meansCollector 파싱 실패: {def}"
+        );
     }
 
     #[test]
@@ -582,7 +794,7 @@ mod tests {
             "conjs": [{ "tense_type": "11", "conj_content": "presented" }],
             "means": [{ "origin_mean": "현재의", "examples": [{ "origin_example": "at present", "translations": [{ "origin_translation": "현재" }] }] }]
         });
-        let def = build_definition(&entry);
+        let def = build_definition(&entry, None);
         assert!(def.contains("현재의, 선물"));
         assert!(def.contains("pre·sent"));
         assert!(def.contains("동[prɪˈzent]"));
