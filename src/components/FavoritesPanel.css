@@ -136,20 +136,35 @@
 
 .fav__term {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
   text-align: left;
   font-family: var(--font-body);
   font-size: var(--text-body);
-  color: var(--color-ink);
   background: transparent;
   border: none;
   padding: var(--space-2) 0;
   cursor: pointer;
+}
+
+.fav__word {
+  flex-shrink: 0;
+  color: var(--color-ink);
+}
+.fav__term:hover .fav__word {
+  color: var(--color-accent);
+}
+
+.fav__gloss {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-small);
+  color: var(--color-ink-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.fav__term:hover {
-  color: var(--color-accent);
 }
 
 .fav__remove {

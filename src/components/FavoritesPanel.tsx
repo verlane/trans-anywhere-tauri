@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { groupFavorites } from "../lib/groupFavorites";
+import type { FavoriteItem } from "../lib/favorites";
 import type { Lang } from "../lib/lang";
 import "./FavoritesPanel.css";
 
 interface FavoritesPanelProps {
-  items: string[];
+  items: FavoriteItem[];
   onPick: (term: string) => void;
   onRemove: (term: string) => void;
   onClose: () => void;
@@ -61,16 +62,21 @@ export function FavoritesPanel({ items, onPick, onRemove, onClose }: FavoritesPa
               <section key={group.lang} className="fav__section">
                 <h3 className="fav__section-head">{group.label}</h3>
                 <ul className="fav__list">
-                  {group.items.map((term) => (
-                    <li key={term} className="fav__item">
-                      <button type="button" className="fav__term" onClick={() => onPick(term)}>
-                        {term}
+                  {group.items.map((item) => (
+                    <li key={item.term} className="fav__item">
+                      <button
+                        type="button"
+                        className="fav__term"
+                        onClick={() => onPick(item.term)}
+                      >
+                        <span className="fav__word">{item.term}</span>
+                        {item.gloss && <span className="fav__gloss">{item.gloss}</span>}
                       </button>
                       <button
                         type="button"
                         className="fav__remove"
-                        onClick={() => onRemove(term)}
-                        aria-label={`${term} 삭제`}
+                        onClick={() => onRemove(item.term)}
+                        aria-label={`${item.term} 삭제`}
                         title="삭제"
                       >
                         ✕
