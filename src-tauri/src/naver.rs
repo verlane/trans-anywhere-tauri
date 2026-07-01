@@ -527,6 +527,37 @@ fn extract_pron_urls(entry: &Value, dict: Dict) -> (Option<String>, Option<Strin
     }
 }
 
+/// nVoice voice used for the US accent (female). Kept as a constant so the one
+/// magic string lives in a single place.
+const US_TTS_SPEAKER: &str = "clara";
+
+/// The Naver nVoice TTS url that synthesizes a pronunciation for a headword.
+/// Used as the US fallback for entries that ship no US recording (e.g.
+/// "seashore"), mirroring what the web dictionary does. `text` comes from
+/// `tts_entry_name` (a TTS-normalized headword), falling back to the display
+/// name; `vcode` is appended when present to match the exact voice clip.
+fn naver_tts_url(entry: &Value, speaker: &str) -> Option<String> {
+    let member = entry.pointer("/members/0")?;
+    let text = ["tts_entry_name", "show_full_name"]
+        .iter()
+        .find_map(|k| member.get(*k).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?;
+    let mut url = format!(
+        "https://en.dict.naver.com/api/nvoice?speaker={speaker}&service=dictionary&speech_fmt=mp3&text={}",
+        urlencoding::encode(text)
+    );
+    if let Some(vcode) = member
+        .get("tts_vcode")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    {
+        url.push_str("&vcode=");
+        url.push_str(vcode);
+    }
+    Some(url)
+}
+
 /// Enko: Naver tags US audio as "A" or "C" (general American) and UK audio as "E".
 fn extract_pron_urls_enko(entry: &Value) -> (Option<String>, Option<String>) {
     let mut us = None;
@@ -539,6 +570,12 @@ fn extract_pron_urls_enko(entry: &Value) -> (Option<String>, Option<String>) {
                 _ => {}
             }
         }
+    }
+    // No US recording -> synthesize one with nVoice TTS, like the web dictionary
+    // does for words such as "seashore". The background download task then caches
+    // the resulting mp3 into media1 like any other pronunciation.
+    if us.is_none() {
+        us = naver_tts_url(entry, US_TTS_SPEAKER);
     }
     (us, uk)
 }
@@ -660,6 +697,49 @@ mod tests {
         assert_eq!(clean("  spaced  "), "spaced");
         // A bare "<" that is not a tag should survive.
         assert_eq!(clean("a < b"), "a < b");
+    }
+
+    #[test]
+    fn enko_falls_back_to_tts_when_no_us_recording() {
+        // seashore류: 미국(A) 발음 녹음 파일이 없으면 nvoice TTS(clara)로 폴백한다.
+        let entry = serde_json::json!({
+            "members": [{
+                "tts_entry_name": "seashore",
+                "tts_vcode": "565825",
+                "prons": [
+                    { "pron_type": "A", "pron_symbol": "ˈsiːʃɔː(r)" },
+                    { "pron_type": "E", "female_pron_file": "https://dict.example/uk.mp3" }
+                ]
+            }]
+        });
+        let (us, uk) = extract_pron_urls(&entry, Dict::Enko);
+        let us = us.expect("US TTS 폴백이 없음");
+        assert!(us.contains("/api/nvoice"), "nvoice 엔드포인트 아님: {us}");
+        assert!(us.contains("speaker=clara"), "미국 음성 아님: {us}");
+        assert!(us.contains("text=seashore"), "표제어 누락: {us}");
+        assert!(us.contains("vcode=565825"), "vcode 누락: {us}");
+        // 녹음이 있는 영국식은 파일을 그대로 쓴다.
+        assert_eq!(uk.as_deref(), Some("https://dict.example/uk.mp3"));
+    }
+
+    #[test]
+    fn enko_prefers_us_recording_over_tts() {
+        // 미국식 녹음 파일이 있으면 TTS로 바꾸지 않는다(회귀 방지).
+        let entry = serde_json::json!({
+            "members": [{
+                "tts_entry_name": "love",
+                "prons": [
+                    { "pron_type": "A", "female_pron_file": "https://dict.example/us.mp3" },
+                    { "pron_type": "E", "female_pron_file": "https://dict.example/uk.mp3" }
+                ]
+            }]
+        });
+        let (us, _) = extract_pron_urls(&entry, Dict::Enko);
+        assert_eq!(
+            us.as_deref(),
+            Some("https://dict.example/us.mp3"),
+            "녹음이 있는데 TTS로 바뀜"
+        );
     }
 
     #[test]
