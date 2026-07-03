@@ -22,7 +22,8 @@ const FALLBACK: Settings = {
 
 interface UseSettings {
   settings: Settings;
-  update: (patch: Partial<Settings>) => void;
+  /** Apply and persist a change. Resolves to an error message, or null on success. */
+  update: (patch: Partial<Settings>) => Promise<string | null>;
   loaded: boolean;
 }
 
@@ -46,12 +47,15 @@ export function useSettings(): UseSettings {
     };
   }, []);
 
-  function update(patch: Partial<Settings>) {
-    setSettings((prev) => {
-      const next = { ...prev, ...patch };
-      saveSettings(next).catch(() => {});
-      return next;
-    });
+  // The save runs outside the setState updater — React requires updaters to be
+  // pure, and StrictMode invokes them twice in dev (double-saving every change).
+  function update(patch: Partial<Settings>): Promise<string | null> {
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    return saveSettings(next).then(
+      () => null,
+      (e) => String(e),
+    );
   }
 
   return { settings, update, loaded };

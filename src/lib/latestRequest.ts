@@ -13,5 +13,17 @@ export interface LatestRequestGuard {
 }
 
 export function createLatestRequestGuard(): LatestRequestGuard {
-  throw new Error("not implemented");
+  let current = 0;
+  return {
+    begin() {
+      current += 1;
+      return current;
+    },
+    isCurrent(id: number) {
+      return id === current;
+    },
+    invalidate() {
+      current += 1;
+    },
+  };
 }

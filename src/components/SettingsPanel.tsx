@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { Accent, Settings, ThemeMode } from "../lib/api";
 import { captureHotkey, prettyHotkey, EDITOR_KEY } from "../lib/hotkey";
@@ -6,7 +7,8 @@ import "./SettingsPanel.css";
 
 interface SettingsPanelProps {
   settings: Settings;
-  update: (patch: Partial<Settings>) => void;
+  /** Resolves to an error message (e.g. hotkey registration failure), or null. */
+  update: (patch: Partial<Settings>) => Promise<string | null>;
   onClose: () => void;
 }
 
@@ -133,7 +135,15 @@ function LangRow({ label, value, onChange }: LangRowProps) {
   );
 }
 
-export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps) {
+export function SettingsPanel({ settings, update: rawUpdate, onClose }: SettingsPanelProps) {
+  // A failed save (invalid DB path, hotkey the OS refused to register) must be
+  // visible — the backend keeps the previous working value in those cases.
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  function update(patch: Partial<Settings>) {
+    rawUpdate(patch).then(setSaveError);
+  }
+
   async function pickDb() {
     const path = await open({
       multiple: false,
@@ -153,6 +163,12 @@ export function SettingsPanel({ settings, update, onClose }: SettingsPanelProps)
             ✕
           </button>
         </header>
+
+        {saveError && (
+          <p className="settings__error" role="alert">
+            저장 실패: {saveError} (이전 설정이 유지됩니다)
+          </p>
+        )}
 
         <SegmentRow
           label="테마"

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const KEY = "transanywhere.history";
 const MAX = 10;
@@ -30,24 +30,22 @@ interface UseHistory {
 export function useHistory(): UseHistory {
   const [items, setItems] = useState<string[]>(load);
 
+  // Persisting as an effect keeps the setState updaters pure (StrictMode
+  // invokes updaters twice in dev, which would double-write storage).
+  useEffect(() => {
+    persist(items);
+  }, [items]);
+
   function add(term: string) {
     const trimmed = term.trim();
     if (!trimmed) {
       return;
     }
-    setItems((prev) => {
-      const next = [trimmed, ...prev.filter((x) => x !== trimmed)].slice(0, MAX);
-      persist(next);
-      return next;
-    });
+    setItems((prev) => [trimmed, ...prev.filter((x) => x !== trimmed)].slice(0, MAX));
   }
 
   function remove(term: string) {
-    setItems((prev) => {
-      const next = prev.filter((x) => x !== term);
-      persist(next);
-      return next;
-    });
+    setItems((prev) => prev.filter((x) => x !== term));
   }
 
   return { items, add, remove };

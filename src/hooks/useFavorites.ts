@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   toggleFavorite,
   isFavorite,
@@ -35,12 +35,14 @@ interface UseFavorites {
 export function useFavorites(): UseFavorites {
   const [items, setItems] = useState<FavoriteItem[]>(load);
 
+  // Persisting as an effect keeps the setState updaters pure (StrictMode
+  // invokes updaters twice in dev, which would double-write storage).
+  useEffect(() => {
+    persist(items);
+  }, [items]);
+
   function toggle(term: string, gloss = "") {
-    setItems((prev) => {
-      const next = toggleFavorite(prev, term, gloss);
-      persist(next);
-      return next;
-    });
+    setItems((prev) => toggleFavorite(prev, term, gloss));
   }
 
   function has(term: string): boolean {
