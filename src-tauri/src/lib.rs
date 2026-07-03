@@ -176,7 +176,6 @@ fn register_repeat_guards(
             Err(e) => eprintln!("[keyguard] parse '{spec}' failed: {e}"),
         }
     }
-    eprintln!("[keyguard] {} repeat guard(s) registered", guards.len());
     guards
 }
 
@@ -200,7 +199,6 @@ fn release_repeat_guards(
         for shortcut in guards {
             let _ = gs.unregister(shortcut);
         }
-        eprintln!("[keyguard] repeat guards released");
     });
 }
 
