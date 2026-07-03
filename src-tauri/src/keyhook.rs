@@ -82,6 +82,9 @@ mod imp {
     static TARGET_VK: AtomicU32 = AtomicU32::new(0);
     /// Auto-repeat key-downs swallowed in the current session (diagnostic).
     static SWALLOWED: AtomicU32 = AtomicU32::new(0);
+    /// Of those, how many carried the LLKHF_INJECTED flag (diagnostic: reveals
+    /// a shortcut layer re-injecting the key rather than hardware auto-repeat).
+    static SWALLOWED_INJECTED: AtomicU32 = AtomicU32::new(0);
 
     /// How long the hook may live at most, even if the key is never seen up.
     const SAFETY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -92,19 +95,23 @@ mod imp {
         if code >= 0 {
             let info = &*(lparam as *const KBDLLHOOKSTRUCT);
             let target = TARGET_VK.load(Ordering::SeqCst);
-            let injected = info.flags & LLKHF_INJECTED != 0;
-            // Swallow only the held key's own auto-repeat key-downs so they
-            // can't type into the focused window (or close a browser tab as
-            // Ctrl+W while our Ctrl is down). Key-ups pass through untouched;
-            // when to STOP suppressing is decided by polling the physical key
-            // state (below), never by a key-up in the event stream — auto-
-            // repeat artifacts there caused the hook to unhook far too early.
+            // Swallow the held key's key-downs — INJECTED OR NOT — so they can't
+            // type into the focused window (or close a browser tab as Ctrl+W
+            // while our Ctrl is down). We never synthesize this key ourselves,
+            // so blocking injected copies is safe and necessary: the global-
+            // shortcut layer re-injects the suppressed key, and those injected
+            // key-downs were leaking straight past an earlier `!injected` guard.
+            // Key-ups pass through untouched; when to STOP suppressing is
+            // decided by polling the physical key state (below), never by a
+            // key-up in the stream — repeat artifacts unhooked the hook early.
             if target != 0
-                && !injected
                 && info.vkCode == target
                 && matches!(wparam as u32, WM_KEYDOWN | WM_SYSKEYDOWN)
             {
                 SWALLOWED.fetch_add(1, Ordering::SeqCst);
+                if info.flags & LLKHF_INJECTED != 0 {
+                    SWALLOWED_INJECTED.fetch_add(1, Ordering::SeqCst);
+                }
                 return 1;
             }
         }
@@ -145,6 +152,7 @@ mod imp {
             SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
             let tid = GetCurrentThreadId();
             SWALLOWED.store(0, Ordering::SeqCst);
+            SWALLOWED_INJECTED.store(0, Ordering::SeqCst);
             eprintln!("[keyhook] installed for vk=0x{vk:02X}");
             let _ = ready_tx.send(true);
 
@@ -171,8 +179,9 @@ mod imp {
             UnhookWindowsHookEx(hook);
             TARGET_VK.store(0, Ordering::SeqCst);
             eprintln!(
-                "[keyhook] released; swallowed {} auto-repeat(s)",
-                SWALLOWED.load(Ordering::SeqCst)
+                "[keyhook] released; swallowed {} auto-repeat(s) ({} injected)",
+                SWALLOWED.load(Ordering::SeqCst),
+                SWALLOWED_INJECTED.load(Ordering::SeqCst)
             );
         });
         // Wait for installation so the caller's synthesized modifier release
