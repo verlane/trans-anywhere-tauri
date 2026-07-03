@@ -15,8 +15,11 @@
 /// strings like "Alt+W" / "ctrl+shift+F5", normalized to uppercase so it can
 /// be re-registered as a bare shortcut ("W", "Ctrl+W").
 pub fn main_key_token(hotkey: &str) -> Option<String> {
-    let _ = hotkey;
-    unimplemented!("main_key_token not implemented yet")
+    let key = hotkey.rsplit('+').next()?.trim();
+    if key.is_empty() {
+        return None;
+    }
+    Some(key.to_ascii_uppercase())
 }
 
 /// Windows virtual-key code for the hotkey's main key, used to poll the
