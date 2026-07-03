@@ -1,5 +1,5 @@
 /** How many recent search terms are kept (and shown as chips). */
-export const HISTORY_MAX = 10;
+export const HISTORY_MAX = 20;
 
 /** Prepend a term, dedup against existing entries, and cap the list. */
 export function addTerm(items: string[], term: string): string[] {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
+import { addTerm, removeTerm } from "../lib/history";
 
 const KEY = "transanywhere.history";
-const MAX = 10;
 
 function load(): string[] {
   try {
@@ -37,15 +37,11 @@ export function useHistory(): UseHistory {
   }, [items]);
 
   function add(term: string) {
-    const trimmed = term.trim();
-    if (!trimmed) {
-      return;
-    }
-    setItems((prev) => [trimmed, ...prev.filter((x) => x !== trimmed)].slice(0, MAX));
+    setItems((prev) => addTerm(prev, term));
   }
 
   function remove(term: string) {
-    setItems((prev) => prev.filter((x) => x !== term));
+    setItems((prev) => removeTerm(prev, term));
   }
 
   return { items, add, remove };
