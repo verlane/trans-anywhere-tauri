@@ -5,6 +5,7 @@ mod google;
 mod http;
 mod lang;
 mod naver;
+mod selection;
 mod settings;
 
 use commands::AppState;
