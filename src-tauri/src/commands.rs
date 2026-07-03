@@ -291,7 +291,7 @@ async fn lookup_reading_word(
     for result in &results {
         let hw = result.cache_key(&reading.to_lowercase());
         with_db(state, |c| {
-            db::upsert_entry(c, sl, "ko", &hw, &result.definition, None)
+            db::upsert_entry(c, sl, "ko", &hw, &result.definition)
         })
         .map_err(err)?;
         with_db(state, |c| db::set_media_tried(c, sl, "ko", &hw)).map_err(err)?;
@@ -417,7 +417,7 @@ async fn lookup_dict_word(
     let definition = result.definition.clone();
     let hw_for_def = hw.clone();
     with_db(state, move |conn| {
-        db::upsert_entry(conn, sl, "ko", &hw_for_def, &definition, None)
+        db::upsert_entry(conn, sl, "ko", &hw_for_def, &definition)
     })
     .map_err(err)?;
     // A fresh Naver fetch (cache miss or force-refresh) counts as an attempt.

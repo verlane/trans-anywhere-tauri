@@ -157,14 +157,16 @@ pub fn select_pron(
     Ok(blob)
 }
 
-/// Insert or update a cached entry with its definition and optional pronunciation BLOB.
+/// Insert or update a cached entry's definition. Pronunciation columns
+/// (media1/media2) are owned exclusively by `update_pron` and are never
+/// touched here — a re-cache (force refresh, reading-group rebuild) must
+/// not wipe already-downloaded audio.
 pub fn upsert_entry(
     conn: &Connection,
     sl: &str,
     tl: &str,
     word: &str,
     definition: &str,
-    media1: Option<&[u8]>,
 ) -> anyhow::Result<()> {
     let exists: Option<i64> = conn
         .query_row(
@@ -178,16 +180,16 @@ pub fn upsert_entry(
         Some(id) => {
             conn.execute(
                 "UPDATE entries
-                 SET updated_at = DATETIME('now', 'localtime'), definition = ?1, media1 = ?2
-                 WHERE id = ?3",
-                params![definition, media1, id],
+                 SET updated_at = DATETIME('now', 'localtime'), definition = ?1
+                 WHERE id = ?2",
+                params![definition, id],
             )?;
         }
         None => {
             conn.execute(
-                "INSERT INTO entries (source_language, target_language, word, definition, media1)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![sl, tl, word, definition, media1],
+                "INSERT INTO entries (source_language, target_language, word, definition)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![sl, tl, word, definition],
             )?;
         }
     }
@@ -314,7 +316,7 @@ mod tests {
     #[test]
     fn media_tried_defaults_false_and_can_be_set() {
         let conn = mem();
-        upsert_entry(&conn, "en", "ko", "word", "뜻", None).unwrap();
+        upsert_entry(&conn, "en", "ko", "word", "뜻").unwrap();
         assert!(
             !select_entry(&conn, "en", "ko", "word")
                 .unwrap()
@@ -336,11 +338,11 @@ mod tests {
         // 발음 BLOB(media1/media2)은 지워지면 안 된다. media_tried=1과 결합하면
         // 지워진 발음은 영영 재다운로드되지 않기 때문.
         let conn = mem();
-        upsert_entry(&conn, "en", "ko", "run", "달리다", None).unwrap();
+        upsert_entry(&conn, "en", "ko", "run", "달리다").unwrap();
         update_pron(&conn, "en", "ko", "run", Accent::Us, &[1, 2, 3]).unwrap();
         update_pron(&conn, "en", "ko", "run", Accent::Uk, &[4, 5]).unwrap();
 
-        upsert_entry(&conn, "en", "ko", "run", "달리다 (갱신)", None).unwrap();
+        upsert_entry(&conn, "en", "ko", "run", "달리다 (갱신)").unwrap();
 
         let entry = select_entry(&conn, "en", "ko", "run").unwrap().unwrap();
         assert_eq!(entry.definition, "달리다 (갱신)");
@@ -355,7 +357,8 @@ mod tests {
     #[test]
     fn insert_then_select_roundtrip() {
         let conn = mem();
-        upsert_entry(&conn, "en", "ko", "present", "현재의", Some(&[1, 2, 3])).unwrap();
+        upsert_entry(&conn, "en", "ko", "present", "현재의").unwrap();
+        update_pron(&conn, "en", "ko", "present", Accent::Us, &[1, 2, 3]).unwrap();
         let entry = select_entry(&conn, "en", "ko", "present").unwrap().unwrap();
         assert_eq!(entry.word, "present");
         assert_eq!(entry.definition, "현재의");
@@ -374,7 +377,7 @@ mod tests {
     #[test]
     fn update_pron_writes_uk_column() {
         let conn = mem();
-        upsert_entry(&conn, "en", "ko", "schedule", "일정", None).unwrap();
+        upsert_entry(&conn, "en", "ko", "schedule", "일정").unwrap();
         update_pron(&conn, "en", "ko", "schedule", Accent::Uk, &[9, 8, 7]).unwrap();
         let entry = select_entry(&conn, "en", "ko", "schedule")
             .unwrap()
@@ -390,15 +393,15 @@ mod tests {
     #[test]
     fn empty_definition_is_not_a_hit() {
         let conn = mem();
-        upsert_entry(&conn, "en", "ko", "ghost", "", None).unwrap();
+        upsert_entry(&conn, "en", "ko", "ghost", "").unwrap();
         assert!(select_entry(&conn, "en", "ko", "ghost").unwrap().is_none());
     }
 
     #[test]
     fn upsert_updates_existing_definition() {
         let conn = mem();
-        upsert_entry(&conn, "en", "ko", "run", "", None).unwrap();
-        upsert_entry(&conn, "en", "ko", "run", "달리다", None).unwrap();
+        upsert_entry(&conn, "en", "ko", "run", "").unwrap();
+        upsert_entry(&conn, "en", "ko", "run", "달리다").unwrap();
         let entry = select_entry(&conn, "en", "ko", "run").unwrap().unwrap();
         assert_eq!(entry.definition, "달리다");
     }
