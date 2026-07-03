@@ -24,8 +24,32 @@ pub fn remember_hotkey(hotkey: &str) {
 /// segment of strings like "Alt+W" / "ctrl+shift+F5". Returns None for keys
 /// this table doesn't cover (suppression is then skipped, not an error).
 pub fn main_key_vk(hotkey: &str) -> Option<u32> {
-    let _ = hotkey;
-    unimplemented!("main_key_vk not implemented yet")
+    let key = hotkey.rsplit('+').next()?.trim();
+    if key.is_empty() {
+        return None;
+    }
+    let upper = key.to_ascii_uppercase();
+    match upper.as_bytes() {
+        [c @ b'A'..=b'Z'] | [c @ b'0'..=b'9'] => Some(*c as u32),
+        _ => match upper.as_str() {
+            "SPACE" => Some(0x20),
+            "INSERT" => Some(0x2D),
+            "DELETE" => Some(0x2E),
+            "HOME" => Some(0x24),
+            "END" => Some(0x23),
+            "PAGEUP" => Some(0x21),
+            "PAGEDOWN" => Some(0x22),
+            _ => {
+                // F1..F24 -> VK_F1 (0x70) ..
+                let n: u32 = upper.strip_prefix('F')?.parse().ok()?;
+                if (1..=24).contains(&n) {
+                    Some(0x70 + n - 1)
+                } else {
+                    None
+                }
+            }
+        },
+    }
 }
 
 /// Swallow the configured hotkey key's physical key-down events system-wide

@@ -96,11 +96,16 @@ const COPY_SENTINEL: &str = "\u{1}__transanywhere_no_selection__\u{1}";
 
 /// Long press: copy the current selection from the foreground app, then show the
 /// window and search it. If nothing was selected, restore the clipboard and just
-/// show the window. Runs after the hotkey is released (never while it is still
-/// held — see the shortcut handler) on its own thread, so it may block.
+/// show the window. Runs on the press timer thread while the hotkey is still
+/// physically held, so it may block; the keyhook suppresses the held key.
 #[cfg(desktop)]
 fn show_main_with_selection(app: &tauri::AppHandle) {
     use tauri::Emitter;
+    // The user is still holding the hotkey. Swallow its main key's hardware
+    // auto-repeat before any modifier is synthesized up — otherwise a held W
+    // types "wwww" (or closes a tab as Ctrl+W) the moment Alt goes up.
+    #[cfg(windows)]
+    keyhook::suppress_hotkey_key_until_release();
     let backup = backup_clipboard();
     set_clipboard(COPY_SENTINEL);
     copy_selection();
@@ -133,11 +138,11 @@ fn copy_selection() {
         Enigo, Key, Keyboard, Settings,
     };
     if let Ok(mut enigo) = Enigo::new(&Settings::default()) {
-        // The Released event fires when the hotkey's main key goes up, but its
-        // modifiers may still be physically held (Alt+W: W released first, Alt
-        // a beat later). Releasing them here keeps the target app from seeing
-        // Ctrl+Alt+C — which is not Copy. (v1's AutoHotkey `Send ^c` released
-        // physical modifiers implicitly.)
+        // The user is still physically holding the hotkey (e.g. Alt+W), so the
+        // foreground app would see Ctrl+Alt+C — which is not Copy — unless
+        // those modifiers are released first. (v1's AutoHotkey `Send ^c`
+        // released physical modifiers implicitly; the held key's auto-repeat
+        // is already being swallowed by the keyhook.)
         let _ = enigo.key(Key::Alt, Release);
         let _ = enigo.key(Key::Shift, Release);
         let _ = enigo.key(Key::Meta, Release);
@@ -222,7 +227,10 @@ pub fn apply_hotkey(app: &tauri::AppHandle, hotkey: &str) -> Result<(), String> 
         .parse::<tauri_plugin_global_shortcut::Shortcut>()
         .map_err(|e| format!("invalid hotkey '{trimmed}': {e}"))?;
     gs.register(shortcut)
-        .map_err(|e| format!("failed to register hotkey '{trimmed}': {e}"))
+        .map_err(|e| format!("failed to register hotkey '{trimmed}': {e}"))?;
+    #[cfg(windows)]
+    keyhook::remember_hotkey(trimmed);
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -240,12 +248,10 @@ pub fn run() {
                 match event.state() {
                     ShortcutState::Pressed => {
                         // Ignore key auto-repeat and presses while a previous
-                        // long action is still running; arm a timer that only
-                        // MARKS the press as long. The action itself runs on
-                        // release — while the hotkey is physically held, its
-                        // key would hardware-auto-repeat as plain text the
-                        // moment we synthesized the modifiers up (Alt+W held →
-                        // "wwww" typed into whatever has focus).
+                        // long action is still running; arm a timer that fires
+                        // the long action while the key is still held (v1 UX).
+                        // The held key's own auto-repeat is swallowed by the
+                        // keyhook for the duration of the action.
                         if SELECTION_IN_FLIGHT.load(Ordering::SeqCst) {
                             return;
                         }
@@ -259,37 +265,43 @@ pub fn run() {
                             s.generation = s.generation.wrapping_add(1);
                             s.generation
                         };
+                        let app = app.clone();
                         std::thread::spawn(move || {
                             std::thread::sleep(LONG_PRESS);
-                            let mut s = HOTKEY.lock().unwrap();
-                            if s.pressed && !s.fired && s.generation == generation {
-                                s.fired = true;
+                            let fire = {
+                                let mut s = HOTKEY.lock().unwrap();
+                                if s.pressed && !s.fired && s.generation == generation {
+                                    s.fired = true;
+                                    // The press session ends here: once the
+                                    // modifiers are synthesized up, the plugin
+                                    // may never deliver a Released event, so
+                                    // don't leave `pressed` waiting on one.
+                                    s.pressed = false;
+                                    // Claimed inside the lock so a release+retap
+                                    // can't observe a not-yet-flagged long action.
+                                    SELECTION_IN_FLIGHT.store(true, Ordering::SeqCst);
+                                    true
+                                } else {
+                                    false
+                                }
+                            };
+                            if fire {
+                                show_main_with_selection(&app);
+                                SELECTION_IN_FLIGHT.store(false, Ordering::SeqCst);
                             }
                         });
                     }
                     ShortcutState::Released => {
-                        // Released before the timer -> short tap; after it ->
-                        // the long copy/search action (now safe: the key no
-                        // longer auto-repeats).
-                        let (short, long) = {
+                        // Released before the timer -> short tap. A long press
+                        // already ran (or is running) its action from the timer
+                        // thread; `pressed` was cleared there.
+                        let short = {
                             let mut s = HOTKEY.lock().unwrap();
                             let was_pressed = s.pressed;
                             s.pressed = false;
-                            (was_pressed && !s.fired, was_pressed && s.fired)
+                            was_pressed && !s.fired
                         };
-                        if SELECTION_IN_FLIGHT.load(Ordering::SeqCst) {
-                            return;
-                        }
-                        if long {
-                            SELECTION_IN_FLIGHT.store(true, Ordering::SeqCst);
-                            let app = app.clone();
-                            // show_main_with_selection blocks on the clipboard
-                            // poll, so it must not run on the event thread.
-                            std::thread::spawn(move || {
-                                show_main_with_selection(&app);
-                                SELECTION_IN_FLIGHT.store(false, Ordering::SeqCst);
-                            });
-                        } else if short {
+                        if short && !SELECTION_IN_FLIGHT.load(Ordering::SeqCst) {
                             show_main(app);
                         }
                     }
