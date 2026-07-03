@@ -42,5 +42,14 @@ tauri-plugin-window-state = "2"
 enigo = "0.3"
 arboard = "3"
 
+# Windows-only: low-level keyboard hook that suppresses the held hotkey key's
+# auto-repeat while the long-press copy runs (see keyhook.rs).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 [dev-dependencies]
 tempfile = "3"

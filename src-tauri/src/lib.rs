@@ -3,6 +3,8 @@ mod commands;
 mod db;
 mod google;
 mod http;
+#[cfg(all(desktop, windows))]
+mod keyhook;
 mod lang;
 mod naver;
 mod selection;
