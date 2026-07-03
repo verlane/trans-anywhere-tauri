@@ -700,6 +700,22 @@ mod tests {
     }
 
     #[test]
+    fn extract_search_items_carries_means_collector() {
+        // 교차참조형 항목(뜻이 meansCollector에만 있음)이 동음이의어 그룹에서
+        // 조용히 누락되지 않도록, 검색 항목의 meansCollector를 상세 조회까지 나른다.
+        let mc = serde_json::json!([{ "means": [{ "value": "recap 참조" }] }]);
+        let search = serde_json::json!({
+            "searchResultMap": { "searchResultListMap": { "WORD": { "items": [
+                { "entryId": "1", "expKanji": "帰る", "meansCollector": mc.clone() },
+                { "entryId": "2", "expKanji": "変える" }
+            ]}}}
+        });
+        let items = extract_search_items(&search, 5);
+        assert_eq!(items[0].means_collector, Some(mc));
+        assert_eq!(items[1].means_collector, None);
+    }
+
+    #[test]
     fn item_headword_none_when_absent() {
         let item = serde_json::json!({ "entryId": "abc" });
         assert_eq!(item_headword(&item), None);
