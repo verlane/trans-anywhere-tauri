@@ -65,7 +65,8 @@ pub fn suppress_hotkey_key_until_release() {
 mod imp {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::mpsc;
-    use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::Foundation::{GetLastError, LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::System::Threading::GetCurrentThreadId;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
@@ -78,6 +79,8 @@ mod imp {
     static TARGET_VK: AtomicU32 = AtomicU32::new(0);
     /// Hook thread id, so the callback / watchdog can end its message loop.
     static HOOK_THREAD: AtomicU32 = AtomicU32::new(0);
+    /// Auto-repeat key-downs swallowed in the current session (diagnostic).
+    static SWALLOWED: AtomicU32 = AtomicU32::new(0);
 
     /// How long the hook may live at most, even if the key-up is never seen.
     const SAFETY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -92,7 +95,10 @@ mod imp {
                     // Hardware auto-repeat of the held key: swallow it so it
                     // cannot type into the focused window (or close a browser
                     // tab as Ctrl+W while our Ctrl is down).
-                    WM_KEYDOWN | WM_SYSKEYDOWN => return 1,
+                    WM_KEYDOWN | WM_SYSKEYDOWN => {
+                        SWALLOWED.fetch_add(1, Ordering::SeqCst);
+                        return 1;
+                    }
                     // Physical release: repeats are over. Let the key-up pass
                     // through and shut the hook down.
                     WM_KEYUP | WM_SYSKEYUP => {
@@ -111,6 +117,7 @@ mod imp {
 
     pub(super) fn suppress_until_release(vk: u32) {
         if vk == 0 {
+            eprintln!("[keyhook] hotkey main key unknown; auto-repeat suppression skipped");
             return;
         }
         // Only one suppression at a time (long presses are serialized anyway).
@@ -119,14 +126,21 @@ mod imp {
         }
         let (ready_tx, ready_rx) = mpsc::channel::<bool>();
         std::thread::spawn(move || unsafe {
-            let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), std::ptr::null_mut(), 0);
+            let hmod = GetModuleHandleW(std::ptr::null());
+            let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), hmod, 0);
             if hook.is_null() {
+                eprintln!(
+                    "[keyhook] SetWindowsHookExW failed (err={}); suppression skipped",
+                    GetLastError()
+                );
                 TARGET_VK.store(0, Ordering::SeqCst);
                 let _ = ready_tx.send(false);
                 return;
             }
             let tid = GetCurrentThreadId();
             HOOK_THREAD.store(tid, Ordering::SeqCst);
+            SWALLOWED.store(0, Ordering::SeqCst);
+            eprintln!("[keyhook] installed for vk=0x{vk:02X}");
             let _ = ready_tx.send(true);
 
             // Watchdog: never leave a system-wide hook lingering.
@@ -144,6 +158,10 @@ mod imp {
             UnhookWindowsHookEx(hook);
             HOOK_THREAD.store(0, Ordering::SeqCst);
             TARGET_VK.store(0, Ordering::SeqCst);
+            eprintln!(
+                "[keyhook] released; swallowed {} auto-repeat(s)",
+                SWALLOWED.load(Ordering::SeqCst)
+            );
         });
         // Wait for installation so the caller's synthesized modifier release
         // can't race ahead of the suppression.
