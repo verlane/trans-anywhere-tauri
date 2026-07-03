@@ -214,13 +214,22 @@ fn copy_selection() {
     if let Ok(mut enigo) = Enigo::new(&Settings::default()) {
         // The user is still physically holding the hotkey (e.g. Alt+W), so the
         // foreground app would see Ctrl+Alt+C — which is not Copy — unless
-        // those modifiers are released first. Ctrl goes DOWN before Alt goes
-        // up: to the target app a bare Alt press+release is a menu-bar
-        // activation, which steals focus from the edit control and eats the
-        // subsequent Ctrl+C (AutoHotkey masks its synthesized Alt-up for the
-        // same reason). The held key's own auto-repeat is consumed by the
-        // temporary shortcut guards for every modifier combination this
-        // sequence passes through.
+        // those modifiers are released first. Two guards around the Alt-up:
+        //
+        // 1. A benign undefined-VK tap (0xFF) marks "a key was pressed while
+        //    Alt was down". Without it the target app treats the synthesized
+        //    Alt-up as a lone Alt tap and arms its menu bar / KeyTips (Win11
+        //    Notepad shows the accelerator overlay and the copy dies) — a
+        //    modifier press alone does NOT cancel KeyTip arming there. This
+        //    is AutoHotkey's A_MenuMaskKey trick, default mask vkFF.
+        // 2. Ctrl goes down before Alt goes up, masking the classic
+        //    DefWindowProc menu-activation path as well.
+        //
+        // The held key's own auto-repeat is consumed by the temporary
+        // shortcut guards for every modifier combination this sequence
+        // passes through.
+        const VK_MENU_MASK: u32 = 0xFF;
+        let _ = enigo.key(Key::Other(VK_MENU_MASK), Click);
         let _ = enigo.key(Key::Control, Press);
         let _ = enigo.key(Key::Alt, Release);
         let _ = enigo.key(Key::Shift, Release);
