@@ -161,7 +161,13 @@ fn register_repeat_guards(
     };
     let gs = app.global_shortcut();
     let mut guards = Vec::new();
-    for spec in [token.clone(), format!("Ctrl+{token}")] {
+    // Bare key: after our Ctrl is released. Ctrl+key: while our Ctrl is down.
+    // Ctrl+Alt+key: the instant between pressing Ctrl and releasing Alt.
+    for spec in [
+        token.clone(),
+        format!("Ctrl+{token}"),
+        format!("Ctrl+Alt+{token}"),
+    ] {
         match spec.parse::<tauri_plugin_global_shortcut::Shortcut>() {
             Ok(shortcut) => match gs.register(shortcut) {
                 Ok(()) => guards.push(shortcut),
@@ -208,14 +214,18 @@ fn copy_selection() {
     if let Ok(mut enigo) = Enigo::new(&Settings::default()) {
         // The user is still physically holding the hotkey (e.g. Alt+W), so the
         // foreground app would see Ctrl+Alt+C — which is not Copy — unless
-        // those modifiers are released first. (v1's AutoHotkey `Send ^c`
-        // released physical modifiers implicitly; the held key's auto-repeat
-        // is already being swallowed by the keyhook.)
+        // those modifiers are released first. Ctrl goes DOWN before Alt goes
+        // up: to the target app a bare Alt press+release is a menu-bar
+        // activation, which steals focus from the edit control and eats the
+        // subsequent Ctrl+C (AutoHotkey masks its synthesized Alt-up for the
+        // same reason). The held key's own auto-repeat is consumed by the
+        // temporary shortcut guards for every modifier combination this
+        // sequence passes through.
+        let _ = enigo.key(Key::Control, Press);
         let _ = enigo.key(Key::Alt, Release);
         let _ = enigo.key(Key::Shift, Release);
         let _ = enigo.key(Key::Meta, Release);
         std::thread::sleep(std::time::Duration::from_millis(20));
-        let _ = enigo.key(Key::Control, Press);
         let _ = enigo.key(Key::Unicode('c'), Click);
         let _ = enigo.key(Key::Control, Release);
     }
