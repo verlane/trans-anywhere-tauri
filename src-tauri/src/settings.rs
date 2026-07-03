@@ -230,6 +230,31 @@ mod tests {
     }
 
     #[test]
+    fn corrupt_file_is_backed_up_not_silently_discarded() {
+        // 쓰다 만/깨진 settings.json은 조용히 기본값으로 초기화하지 말고,
+        // 복구할 수 있게 .bak으로 옆에 남겨둔다.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{ "auto_play": tru"#).unwrap();
+
+        let s = load(&path);
+        assert_eq!(s.theme, "system"); // 기본값으로 동작은 계속된다
+
+        let backup = dir.path().join("settings.json.bak");
+        assert!(backup.exists(), "손상된 설정 파일의 백업이 없다");
+    }
+
+    #[test]
+    fn load_trims_whitespace_in_db_path_and_hotkey() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{ "db_path": "  /data/x.db  ", "hotkey": " Alt+W " }"#).unwrap();
+        let s = load(&path);
+        assert_eq!(s.db_path, "/data/x.db");
+        assert_eq!(s.hotkey, "Alt+W");
+    }
+
+    #[test]
     fn load_resets_invalid_theme() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
