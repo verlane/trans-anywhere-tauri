@@ -387,10 +387,20 @@ fn item_headword(item: &Value) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Collect up to `max` `(entryId, headword)` pairs from a search response, in
-/// result order. A kana reading (かえる) returns several homophone hits here;
-/// items missing a usable headword are skipped.
-fn extract_search_items(search: &Value, max: usize) -> Vec<(String, String)> {
+/// One usable hit from a search response: the entry to fetch, the headword to
+/// display, and the search item's `meansCollector` so a cross-reference entry
+/// (whose detail JSON has no gloss of its own) can still build a definition.
+#[derive(Debug, Clone, PartialEq)]
+struct SearchItem {
+    entry_id: String,
+    headword: String,
+    means_collector: Option<Value>,
+}
+
+/// Collect up to `max` search items in result order. A kana reading (かえる)
+/// returns several homophone hits here; items missing a usable headword are
+/// skipped.
+fn extract_search_items(search: &Value, max: usize) -> Vec<SearchItem> {
     let Some(items) = search
         .pointer("/searchResultMap/searchResultListMap/WORD/items")
         .and_then(Value::as_array)
@@ -412,7 +422,11 @@ fn extract_search_items(search: &Value, max: usize) -> Vec<(String, String)> {
         // so the group never shows the same headword — and its cache row — twice.
         if let (Some(id), Some(head)) = (entry_id, item_headword(item)) {
             if seen.insert(head.clone()) {
-                out.push((id, head));
+                out.push(SearchItem {
+                    entry_id: id,
+                    headword: head,
+                    means_collector: item.get("meansCollector").cloned(),
+                });
             }
         }
     }
@@ -421,17 +435,17 @@ fn extract_search_items(search: &Value, max: usize) -> Vec<(String, String)> {
 
 /// Fetch one entry's detail JSON and build its `NaverResult`, or `None` when the
 /// entry has no usable definition.
-async fn fetch_entry(entry_id: &str, headword: String, dict: Dict) -> Option<NaverResult> {
-    let entry_url = format!("{}?entryId={entry_id}", dict.entry_url());
+async fn fetch_entry(item: SearchItem, dict: Dict) -> Option<NaverResult> {
+    let entry_url = format!("{}?entryId={}", dict.entry_url(), item.entry_id);
     let detail = get_json(&entry_url, dict.referer()).await.ok()?;
     let entry = detail.get("entry").unwrap_or(&Value::Null);
-    let definition = build_definition(entry, None);
+    let definition = build_definition(entry, item.means_collector.as_ref());
     if definition.is_empty() {
         return None;
     }
     let (pron_us_url, pron_uk_url) = extract_pron_urls(entry, dict);
     Some(NaverResult {
-        headword,
+        headword: item.headword,
         definition,
         pron_us_url,
         pron_uk_url,
@@ -458,7 +472,7 @@ pub async fn lookup_reading(
     // the grouped result keeps Naver's relevance ranking.
     let handles: Vec<_> = items
         .into_iter()
-        .map(|(id, head)| tokio::spawn(async move { fetch_entry(&id, head, dict).await }))
+        .map(|item| tokio::spawn(async move { fetch_entry(item, dict).await }))
         .collect();
     let mut out = Vec::new();
     for handle in handles {
@@ -548,15 +562,13 @@ fn naver_tts_url(entry: &Value, speaker: &str) -> Option<String> {
     let member = entry.pointer("/members/0")?;
     // Filter inside find_map so a present-but-blank tts_entry_name still
     // falls through to show_full_name (same pattern as pron_file above).
-    let text = ["tts_entry_name", "show_full_name"]
-        .iter()
-        .find_map(|k| {
-            member
-                .get(*k)
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-        })?;
+    let text = ["tts_entry_name", "show_full_name"].iter().find_map(|k| {
+        member
+            .get(*k)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    })?;
     let mut url = format!(
         "https://en.dict.naver.com/api/nvoice?speaker={speaker}&service=dictionary&speech_fmt=mp3&text={}",
         urlencoding::encode(text)
@@ -650,9 +662,15 @@ mod tests {
         let items = extract_search_items(&search, 5);
         assert_eq!(items.len(), 2);
         // 첫 한자 표기를 클릭/표시·캐시 키로 쓴다(帰る·還る -> 帰る).
-        assert_eq!(items[0], ("1".to_string(), "帰る".to_string()));
+        assert_eq!(
+            (items[0].entry_id.as_str(), items[0].headword.as_str()),
+            ("1", "帰る")
+        );
         // entryId가 숫자로 와도 문자열로 정규화된다.
-        assert_eq!(items[1], ("2".to_string(), "変える".to_string()));
+        assert_eq!(
+            (items[1].entry_id.as_str(), items[1].headword.as_str()),
+            ("2", "変える")
+        );
     }
 
     #[test]
@@ -667,8 +685,14 @@ mod tests {
         });
         let items = extract_search_items(&search, 5);
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0], ("1".to_string(), "帰る".to_string()));
-        assert_eq!(items[1], ("3".to_string(), "変える".to_string()));
+        assert_eq!(
+            (items[0].entry_id.as_str(), items[0].headword.as_str()),
+            ("1", "帰る")
+        );
+        assert_eq!(
+            (items[1].entry_id.as_str(), items[1].headword.as_str()),
+            ("3", "変える")
+        );
     }
 
     #[test]
@@ -680,7 +704,7 @@ mod tests {
             ]}}}
         });
         let items = extract_search_items(&search, 5);
-        assert_eq!(items[0].1, "カット");
+        assert_eq!(items[0].headword, "カット");
     }
 
     #[test]
@@ -695,8 +719,8 @@ mod tests {
         });
         let items = extract_search_items(&search, 2);
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0].1, "帰る");
-        assert_eq!(items[1].1, "返る"); // headless 항목은 제외하고 채운다
+        assert_eq!(items[0].headword, "帰る");
+        assert_eq!(items[1].headword, "返る"); // headless 항목은 제외하고 채운다
     }
 
     #[test]
