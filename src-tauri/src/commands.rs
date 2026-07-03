@@ -326,7 +326,11 @@ async fn translate_input(
     } else {
         &cfg.translate_target
     };
-    let tl = resolve_target(lang::detect(trimmed).code(), target, &cfg.translate_fallback);
+    let tl = resolve_target(
+        lang::detect(trimmed).code(),
+        target,
+        &cfg.translate_fallback,
+    );
     let definition = google::translate(trimmed, "auto", &tl).await.map_err(err)?;
 
     // If the translation is a single dictionary word (e.g. 変える -> "change"),
@@ -584,8 +588,8 @@ pub fn save_settings(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    crate::settings::save(&state.settings_path, &settings).map_err(err)?;
-
+    // Validate and apply the new DB path BEFORE anything is persisted: a bad
+    // path written to disk would make every subsequent launch fail to open it.
     let new_db = resolve_db_path(&settings, &state.data_dir);
     {
         let mut current = state
@@ -602,21 +606,45 @@ pub fn save_settings(
         }
     }
 
+    let previous_hotkey = state
+        .settings
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_string())?
+        .hotkey
+        .clone();
+
+    // A hotkey that fails to register must not be persisted either — restore
+    // the previous working one and report the failure to the frontend.
     #[cfg(desktop)]
-    {
+    let hotkey_error = {
         use tauri::Manager;
-        crate::apply_hotkey(&app, &settings.hotkey);
+        let result = crate::apply_hotkey(&app, &settings.hotkey);
+        if result.is_err() {
+            let _ = crate::apply_hotkey(&app, &previous_hotkey);
+        }
         if let Some(window) = app.get_webview_window("main") {
             let _ = window.set_always_on_top(settings.always_on_top);
         }
-    }
+        result.err()
+    };
+    #[cfg(not(desktop))]
+    let hotkey_error: Option<String> = None;
     let _ = &app;
 
+    let mut to_save = settings;
+    if hotkey_error.is_some() {
+        to_save.hotkey = previous_hotkey;
+    }
+    crate::settings::save(&state.settings_path, &to_save).map_err(err)?;
     *state
         .settings
         .lock()
-        .map_err(|_| "settings lock poisoned".to_string())? = settings;
-    Ok(())
+        .map_err(|_| "settings lock poisoned".to_string())? = to_save;
+
+    match hotkey_error {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 fn with_db<T>(

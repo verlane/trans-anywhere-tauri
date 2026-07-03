@@ -26,8 +26,18 @@ pub fn wait_for_copy(
     timeout: Duration,
     interval: Duration,
 ) -> CopyWait {
-    let _ = (&mut read, sentinel, timeout, interval);
-    unimplemented!("wait_for_copy not implemented yet")
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(text) = read() {
+            if text != sentinel && !text.trim().is_empty() {
+                return CopyWait::Copied(text);
+            }
+        }
+        if Instant::now() >= deadline {
+            return CopyWait::NothingSelected;
+        }
+        std::thread::sleep(interval);
+    }
 }
 
 #[cfg(test)]
@@ -73,14 +83,23 @@ mod tests {
             CopyWait::NothingSelected
         );
         // Must actually have polled, not given up after one fixed read.
-        assert!(calls.get() > 1, "expected polling, got {} reads", calls.get());
+        assert!(
+            calls.get() > 1,
+            "expected polling, got {} reads",
+            calls.get()
+        );
     }
 
     #[test]
     fn slow_app_copy_landing_after_several_polls_is_found() {
         let calls = Cell::new(0);
         let read = scripted_reader(
-            vec![Some(SENTINEL), Some(SENTINEL), Some(SENTINEL), Some("selected text")],
+            vec![
+                Some(SENTINEL),
+                Some(SENTINEL),
+                Some(SENTINEL),
+                Some("selected text"),
+            ],
             &calls,
         );
         assert_eq!(
