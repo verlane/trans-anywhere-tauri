@@ -70,51 +70,50 @@ mod imp {
     use windows_sys::Win32::System::Threading::{
         GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
     };
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
         TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG,
-        WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
+        WH_KEYBOARD_LL, WM_KEYDOWN, WM_QUIT, WM_SYSKEYDOWN,
     };
 
     /// Key currently being suppressed (0 = hook idle). Doubles as the
     /// "already active" latch so only one hook thread ever runs.
     static TARGET_VK: AtomicU32 = AtomicU32::new(0);
-    /// Hook thread id, so the callback / watchdog can end its message loop.
-    static HOOK_THREAD: AtomicU32 = AtomicU32::new(0);
     /// Auto-repeat key-downs swallowed in the current session (diagnostic).
     static SWALLOWED: AtomicU32 = AtomicU32::new(0);
 
-    /// How long the hook may live at most, even if the key-up is never seen.
+    /// How long the hook may live at most, even if the key is never seen up.
     const SAFETY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+    /// How often the watchdog samples the physical key state.
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(8);
 
     unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         if code >= 0 {
             let info = &*(lparam as *const KBDLLHOOKSTRUCT);
             let target = TARGET_VK.load(Ordering::SeqCst);
             let injected = info.flags & LLKHF_INJECTED != 0;
-            if target != 0 && !injected && info.vkCode == target {
-                match wparam as u32 {
-                    // Hardware auto-repeat of the held key: swallow it so it
-                    // cannot type into the focused window (or close a browser
-                    // tab as Ctrl+W while our Ctrl is down).
-                    WM_KEYDOWN | WM_SYSKEYDOWN => {
-                        SWALLOWED.fetch_add(1, Ordering::SeqCst);
-                        return 1;
-                    }
-                    // Physical release: repeats are over. Let the key-up pass
-                    // through and shut the hook down.
-                    WM_KEYUP | WM_SYSKEYUP => {
-                        TARGET_VK.store(0, Ordering::SeqCst);
-                        let tid = HOOK_THREAD.load(Ordering::SeqCst);
-                        if tid != 0 {
-                            PostThreadMessageW(tid, WM_QUIT, 0, 0);
-                        }
-                    }
-                    _ => {}
-                }
+            // Swallow only the held key's own auto-repeat key-downs so they
+            // can't type into the focused window (or close a browser tab as
+            // Ctrl+W while our Ctrl is down). Key-ups pass through untouched;
+            // when to STOP suppressing is decided by polling the physical key
+            // state (below), never by a key-up in the event stream — auto-
+            // repeat artifacts there caused the hook to unhook far too early.
+            if target != 0
+                && !injected
+                && info.vkCode == target
+                && matches!(wparam as u32, WM_KEYDOWN | WM_SYSKEYDOWN)
+            {
+                SWALLOWED.fetch_add(1, Ordering::SeqCst);
+                return 1;
             }
         }
         CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
+    }
+
+    /// True while the key is physically held down right now.
+    unsafe fn key_is_down(vk: u32) -> bool {
+        GetAsyncKeyState(vk as i32) as u16 & 0x8000 != 0
     }
 
     pub(super) fn suppress_until_release(vk: u32) {
@@ -141,21 +140,26 @@ mod imp {
             }
             // A low-level keyboard hook whose thread doesn't service the
             // callback within LowLevelHooksTimeout (~300ms) has that event
-            // passed through instead of swallowed. Under the load of a lookup
-            // (clipboard, focus change, IPC) a normal-priority background
-            // thread gets starved and leaks most repeats — run it real-time so
-            // the pump stays responsive (this is what AutoHotkey's hook does).
+            // passed through instead of swallowed. Run it real-time so the pump
+            // stays responsive under lookup load (as AutoHotkey's hook does).
             SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
             let tid = GetCurrentThreadId();
-            HOOK_THREAD.store(tid, Ordering::SeqCst);
             SWALLOWED.store(0, Ordering::SeqCst);
             eprintln!("[keyhook] installed for vk=0x{vk:02X}");
             let _ = ready_tx.send(true);
 
-            // Watchdog: never leave a system-wide hook lingering.
+            // Stop suppressing once the key is PHYSICALLY released — sampled
+            // directly, not inferred from the event stream — with a hard safety
+            // cap so a system-wide hook can never linger.
             std::thread::spawn(move || {
-                std::thread::sleep(SAFETY_TIMEOUT);
-                PostThreadMessageW(tid, WM_QUIT, 0, 0);
+                let start = std::time::Instant::now();
+                loop {
+                    std::thread::sleep(POLL_INTERVAL);
+                    if !key_is_down(vk) || start.elapsed() >= SAFETY_TIMEOUT {
+                        PostThreadMessageW(tid, WM_QUIT, 0, 0);
+                        break;
+                    }
+                }
             });
 
             // The hook callback runs on this thread while it pumps messages.
@@ -165,7 +169,6 @@ mod imp {
                 DispatchMessageW(&msg);
             }
             UnhookWindowsHookEx(hook);
-            HOOK_THREAD.store(0, Ordering::SeqCst);
             TARGET_VK.store(0, Ordering::SeqCst);
             eprintln!(
                 "[keyhook] released; swallowed {} auto-repeat(s)",
