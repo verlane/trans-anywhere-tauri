@@ -81,23 +81,31 @@ async fn get_json(url: &str, referer: &str) -> anyhow::Result<Value> {
 fn clean(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut in_tag = false;
+    // Chars consumed since the last '<', so an unterminated tag (truncated
+    // API fragment) can be emitted back as text instead of swallowed.
+    let mut tag_buf = String::new();
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
-            '<' => {
+            '<' if !in_tag => {
                 // Only treat `<letter...>` / `</letter...>` as a tag, matching the v1 regex.
                 let is_tag =
                     matches!(chars.peek(), Some(n) if n.is_ascii_alphabetic() || *n == '/');
                 if is_tag {
                     in_tag = true;
+                    tag_buf.clear();
                 } else {
                     out.push(c);
                 }
             }
             '>' if in_tag => in_tag = false,
-            _ if in_tag => {}
+            _ if in_tag => tag_buf.push(c),
             _ => out.push(c),
         }
+    }
+    if in_tag {
+        out.push('<');
+        out.push_str(&tag_buf);
     }
     out.trim().to_string()
 }
@@ -538,11 +546,17 @@ const US_TTS_SPEAKER: &str = "clara";
 /// name; `vcode` is appended when present to match the exact voice clip.
 fn naver_tts_url(entry: &Value, speaker: &str) -> Option<String> {
     let member = entry.pointer("/members/0")?;
+    // Filter inside find_map so a present-but-blank tts_entry_name still
+    // falls through to show_full_name (same pattern as pron_file above).
     let text = ["tts_entry_name", "show_full_name"]
         .iter()
-        .find_map(|k| member.get(*k).and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|s| !s.is_empty())?;
+        .find_map(|k| {
+            member
+                .get(*k)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        })?;
     let mut url = format!(
         "https://en.dict.naver.com/api/nvoice?speaker={speaker}&service=dictionary&speech_fmt=mp3&text={}",
         urlencoding::encode(text)
