@@ -700,6 +700,15 @@ mod tests {
     }
 
     #[test]
+    fn clean_keeps_text_after_unterminated_tag() {
+        // 잘린 API 응답 등으로 태그가 닫히지 않으면 나머지 본문을 버리지 말고 살린다.
+        assert_eq!(
+            clean("before <b>bold</b> after <trunc rest of gloss"),
+            "before bold after <trunc rest of gloss"
+        );
+    }
+
+    #[test]
     fn enko_falls_back_to_tts_when_no_us_recording() {
         // seashore류: 미국(A) 발음 녹음 파일이 없으면 nvoice TTS(clara)로 폴백한다.
         let entry = serde_json::json!({
@@ -720,6 +729,24 @@ mod tests {
         assert!(us.contains("vcode=565825"), "vcode 누락: {us}");
         // 녹음이 있는 영국식은 파일을 그대로 쓴다.
         assert_eq!(uk.as_deref(), Some("https://dict.example/uk.mp3"));
+    }
+
+    #[test]
+    fn tts_falls_back_to_show_full_name_when_tts_entry_name_is_blank() {
+        // 실서버는 tts_entry_name을 빈 문자열로 주기도 한다(expKanji: "" 와 같은 패턴).
+        // 그 경우 show_full_name으로 폴백해야 TTS 합성이 살아난다.
+        let entry = serde_json::json!({
+            "members": [{
+                "tts_entry_name": "",
+                "show_full_name": "seashore",
+                "prons": [
+                    { "pron_type": "A", "pron_symbol": "ˈsiːʃɔː(r)" }
+                ]
+            }]
+        });
+        let (us, _) = extract_pron_urls(&entry, Dict::Enko);
+        let us = us.expect("빈 tts_entry_name에서 show_full_name 폴백이 없음");
+        assert!(us.contains("text=seashore"), "표제어 누락: {us}");
     }
 
     #[test]
