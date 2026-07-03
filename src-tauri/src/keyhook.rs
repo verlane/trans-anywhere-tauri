@@ -67,7 +67,9 @@ mod imp {
     use std::sync::mpsc;
     use windows_sys::Win32::Foundation::{GetLastError, LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
         TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG,
@@ -137,6 +139,13 @@ mod imp {
                 let _ = ready_tx.send(false);
                 return;
             }
+            // A low-level keyboard hook whose thread doesn't service the
+            // callback within LowLevelHooksTimeout (~300ms) has that event
+            // passed through instead of swallowed. Under the load of a lookup
+            // (clipboard, focus change, IPC) a normal-priority background
+            // thread gets starved and leaks most repeats — run it real-time so
+            // the pump stays responsive (this is what AutoHotkey's hook does).
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
             let tid = GetCurrentThreadId();
             HOOK_THREAD.store(tid, Ordering::SeqCst);
             SWALLOWED.store(0, Ordering::SeqCst);
