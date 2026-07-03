@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "src_tauri",
+  "project_id": "e27ff8aa-214b-4f43-952e-cf4ccbda8c3b"
+}
