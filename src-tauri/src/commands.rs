@@ -183,15 +183,21 @@ fn resolve_target(input: &str, target: &str, fallback: &str) -> String {
     }
 }
 
-fn settings_snapshot(state: &State<'_, AppState>) -> Settings {
-    state.settings.lock().map(|s| s.clone()).unwrap_or_default()
+/// Clone the current settings. A poisoned lock is a real error — falling back
+/// to defaults would silently revert the user's translate targets and DB path.
+fn settings_snapshot(state: &State<'_, AppState>) -> Result<Settings, String> {
+    state
+        .settings
+        .lock()
+        .map(|s| s.clone())
+        .map_err(|_| "settings lock poisoned".to_string())
 }
 
 /// Autocomplete suggestions for the in-progress English word.
 #[tauri::command]
-pub fn suggest(query: String, state: State<'_, AppState>) -> Vec<String> {
-    let max = settings_snapshot(&state).suggest_max_results;
-    autocomplete::suggest(&query, &state.words, max)
+pub fn suggest(query: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let max = settings_snapshot(&state)?.suggest_max_results;
+    Ok(autocomplete::suggest(&query, &state.words, max))
 }
 
 /// Main lookup pipeline. Sentences go to Google; English words hit the SQLite
@@ -205,6 +211,7 @@ pub async fn lookup(
     force: bool,
     alt: bool,
     single: bool,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<LookupResult, String> {
     let trimmed = text.trim().to_string();
@@ -214,24 +221,24 @@ pub async fn lookup(
 
     // Toggle shortcut: skip the dictionaries and translate into the secondary target.
     if alt {
-        return translate_input(&trimmed, true, &state).await;
+        return translate_input(&trimmed, true, &app, &state).await;
     }
 
     match route(&trimmed) {
-        Route::Sentence => translate_input(&trimmed, false, &state).await,
+        Route::Sentence => translate_input(&trimmed, false, &app, &state).await,
         Route::EnglishWord => {
-            lookup_dict_word(trimmed, naver::Dict::Enko, "en", force, &state).await
+            lookup_dict_word(trimmed, naver::Dict::Enko, "en", force, &app, &state).await
         }
         Route::JapaneseWord => {
-            lookup_dict_word(trimmed, naver::Dict::Jako, "ja", force, &state).await
+            lookup_dict_word(trimmed, naver::Dict::Jako, "ja", force, &app, &state).await
         }
         // A kana reading groups its homophones, unless we're drilling into one.
         Route::JapaneseReading if single => {
-            lookup_dict_word(trimmed, naver::Dict::Jako, "ja", force, &state).await
+            lookup_dict_word(trimmed, naver::Dict::Jako, "ja", force, &app, &state).await
         }
-        Route::JapaneseReading => lookup_reading_word(trimmed, force, &state).await,
+        Route::JapaneseReading => lookup_reading_word(trimmed, force, &app, &state).await,
         // Non-dictionary single word (e.g. Korean): translate into the primary target.
-        Route::OtherWord => translate_input(&trimmed, false, &state).await,
+        Route::OtherWord => translate_input(&trimmed, false, &app, &state).await,
     }
 }
 
@@ -246,6 +253,7 @@ const READING_MAX: usize = 5;
 async fn lookup_reading_word(
     reading: String,
     force: bool,
+    app: &tauri::AppHandle,
     state: &State<'_, AppState>,
 ) -> Result<LookupResult, String> {
     let sl = "ja";
@@ -291,7 +299,7 @@ async fn lookup_reading_word(
     for result in &results {
         let hw = result.cache_key(&reading.to_lowercase());
         with_db(state, |c| {
-            db::upsert_entry(c, sl, "ko", &hw, &result.definition, None)
+            db::upsert_entry(c, sl, "ko", &hw, &result.definition)
         })
         .map_err(err)?;
         with_db(state, |c| db::set_media_tried(c, sl, "ko", &hw)).map_err(err)?;
@@ -299,8 +307,7 @@ async fn lookup_reading_word(
         let us = result.pron_us_url.clone();
         let uk = result.pron_uk_url.clone();
         if us.is_some() || uk.is_some() {
-            let db_path = state.db_path.lock().map(|p| p.clone()).unwrap_or_default();
-            spawn_pron_download(db_path, sl, hw.clone(), naver::Dict::Jako, us, uk);
+            spawn_pron_download(app.clone(), sl, hw.clone(), naver::Dict::Jako, us, uk);
         }
 
         entries.push(GroupEntry::new(&hw, &gloss_line(&result.definition)));
@@ -318,15 +325,20 @@ async fn lookup_reading_word(
 async fn translate_input(
     trimmed: &str,
     alt: bool,
+    app: &tauri::AppHandle,
     state: &State<'_, AppState>,
 ) -> Result<LookupResult, String> {
-    let cfg = settings_snapshot(state);
+    let cfg = settings_snapshot(state)?;
     let target = if alt {
         &cfg.translate_target_alt
     } else {
         &cfg.translate_target
     };
-    let tl = resolve_target(lang::detect(trimmed).code(), target, &cfg.translate_fallback);
+    let tl = resolve_target(
+        lang::detect(trimmed).code(),
+        target,
+        &cfg.translate_fallback,
+    );
     let definition = google::translate(trimmed, "auto", &tl).await.map_err(err)?;
 
     // If the translation is a single dictionary word (e.g. 変える -> "change"),
@@ -339,7 +351,7 @@ async fn translate_input(
             _ => None,
         };
         if let Some((d, sl)) = dict {
-            let res = lookup_dict_word(translated.to_string(), d, sl, false, state).await?;
+            let res = lookup_dict_word(translated.to_string(), d, sl, false, app, state).await?;
             if res.kind != "empty" {
                 return Ok(res);
             }
@@ -369,6 +381,7 @@ async fn lookup_dict_word(
     dict: naver::Dict,
     sl: &'static str,
     force: bool,
+    app: &tauri::AppHandle,
     state: &State<'_, AppState>,
 ) -> Result<LookupResult, String> {
     let key = word.to_lowercase();
@@ -386,8 +399,7 @@ async fn lookup_dict_word(
             // Backfill missing pronunciation slots once, in the background, so
             // older cached words (e.g. US-only) gain their UK audio when viewed.
             if !(entry.media_tried || (entry.has_us && entry.has_uk)) {
-                let db_path = state.db_path.lock().map(|p| p.clone()).unwrap_or_default();
-                spawn_pron_backfill(db_path, canonical, dict, sl);
+                spawn_pron_backfill(app.clone(), canonical, dict, sl);
             }
             let title = display_title(&word, &entry.word);
             return Ok(LookupResult::new(
@@ -413,7 +425,7 @@ async fn lookup_dict_word(
     let definition = result.definition.clone();
     let hw_for_def = hw.clone();
     with_db(state, move |conn| {
-        db::upsert_entry(conn, sl, "ko", &hw_for_def, &definition, None)
+        db::upsert_entry(conn, sl, "ko", &hw_for_def, &definition)
     })
     .map_err(err)?;
     // A fresh Naver fetch (cache miss or force-refresh) counts as an attempt.
@@ -437,8 +449,7 @@ async fn lookup_dict_word(
     let uk = result.pron_uk_url.clone();
     let has_recording = us.is_some() || uk.is_some();
     if has_recording {
-        let db_path = state.db_path.lock().map(|p| p.clone()).unwrap_or_default();
-        spawn_pron_download(db_path, sl, hw, dict, us, uk);
+        spawn_pron_download(app.clone(), sl, hw, dict, us, uk);
     }
 
     Ok(LookupResult::new(
@@ -451,38 +462,114 @@ async fn lookup_dict_word(
     ))
 }
 
+/// Pronunciation downloads currently running in background tasks, keyed by
+/// "sl:headword". `ensure_pron` consults this so it can wait for the pending
+/// write instead of re-fetching the same audio from Naver.
+static PRON_IN_FLIGHT: std::sync::LazyLock<Mutex<std::collections::HashSet<String>>> =
+    std::sync::LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
+
+fn pron_flight_key(sl: &str, key: &str) -> String {
+    format!("{sl}:{key}")
+}
+
+fn pron_in_flight(sl: &str, key: &str) -> bool {
+    PRON_IN_FLIGHT
+        .lock()
+        .map(|s| s.contains(&pron_flight_key(sl, key)))
+        .unwrap_or(false)
+}
+
+/// Marks one download as in flight for the lifetime of its task.
+struct PronFlightGuard(String);
+
+impl PronFlightGuard {
+    fn claim(sl: &str, key: &str) -> Self {
+        let k = pron_flight_key(sl, key);
+        if let Ok(mut set) = PRON_IN_FLIGHT.lock() {
+            set.insert(k.clone());
+        }
+        Self(k)
+    }
+}
+
+impl Drop for PronFlightGuard {
+    fn drop(&mut self) {
+        if let Ok(mut set) = PRON_IN_FLIGHT.lock() {
+            set.remove(&self.0);
+        }
+    }
+}
+
+/// Write downloaded pronunciation BLOBs through the shared connection, off the
+/// async runtime. Reading the connection from state (instead of a path captured
+/// at spawn time) keeps late writes on the DB the app is actually using, and a
+/// failure is logged — silently dropping it would look identical to "Naver has
+/// no recording for this word".
+async fn write_pron_blobs(
+    app: tauri::AppHandle,
+    sl: &'static str,
+    key: String,
+    us: Option<Vec<u8>>,
+    uk: Option<Vec<u8>>,
+    mark_tried: bool,
+) {
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        use tauri::Manager;
+        let state = app.state::<AppState>();
+        let conn = state
+            .db
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        if let Some(b) = us {
+            db::update_pron(&conn, sl, "ko", &key, db::Accent::Us, &b)?;
+        }
+        if let Some(b) = uk {
+            db::update_pron(&conn, sl, "ko", &key, db::Accent::Uk, &b)?;
+        }
+        if mark_tried {
+            db::set_media_tried(&conn, sl, "ko", &key)?;
+        }
+        Ok(())
+    })
+    .await;
+    match result {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => eprintln!("[pron] cache write failed: {e}"),
+        Err(e) => eprintln!("[pron] cache write task panicked: {e}"),
+    }
+}
+
 /// Download the US/UK (media1/media2) pronunciation slots and cache them, off the
-/// request path. Opens its own DB connection so it can outlive the command.
+/// request path.
 fn spawn_pron_download(
-    db_path: PathBuf,
+    app: tauri::AppHandle,
     sl: &'static str,
     key: String,
     dict: naver::Dict,
     us: Option<String>,
     uk: Option<String>,
 ) {
+    // Claimed before the spawn so an ensure_pron issued right after the lookup
+    // response sees the flight instead of racing it.
+    let guard = PronFlightGuard::claim(sl, &key);
     tokio::spawn(async move {
+        let _guard = guard;
         let us_bytes = download_opt(us, dict).await;
         let uk_bytes = download_opt(uk, dict).await;
         if us_bytes.is_none() && uk_bytes.is_none() {
             return;
         }
-        if let Ok(conn) = db::open(&db_path) {
-            if let Some(b) = us_bytes {
-                let _ = db::update_pron(&conn, sl, "ko", &key, db::Accent::Us, &b);
-            }
-            if let Some(b) = uk_bytes {
-                let _ = db::update_pron(&conn, sl, "ko", &key, db::Accent::Uk, &b);
-            }
-        }
+        write_pron_blobs(app, sl, key, us_bytes, uk_bytes, false).await;
     });
 }
 
 /// Re-query Naver for a cached word with incomplete pronunciation slots, download
 /// whatever audio exists, and mark the attempt so it isn't repeated next time.
-fn spawn_pron_backfill(db_path: PathBuf, word: String, dict: naver::Dict, sl: &'static str) {
+fn spawn_pron_backfill(app: tauri::AppHandle, word: String, dict: naver::Dict, sl: &'static str) {
+    let key = word.to_lowercase();
+    let guard = PronFlightGuard::claim(sl, &key);
     tokio::spawn(async move {
-        let key = word.to_lowercase();
+        let _guard = guard;
         let result = naver::lookup(&word, dict).await.ok().flatten();
         let (us, uk) = match &result {
             Some(r) => (
@@ -491,15 +578,7 @@ fn spawn_pron_backfill(db_path: PathBuf, word: String, dict: naver::Dict, sl: &'
             ),
             None => (None, None),
         };
-        if let Ok(conn) = db::open(&db_path) {
-            if let Some(b) = us {
-                let _ = db::update_pron(&conn, sl, "ko", &key, db::Accent::Us, &b);
-            }
-            if let Some(b) = uk {
-                let _ = db::update_pron(&conn, sl, "ko", &key, db::Accent::Uk, &b);
-            }
-            let _ = db::set_media_tried(&conn, sl, "ko", &key);
-        }
+        write_pron_blobs(app, sl, key, us, uk, true).await;
     });
 }
 
@@ -545,6 +624,24 @@ pub async fn ensure_pron(
         return Ok(bytes);
     }
 
+    // A background task from the lookup may already be downloading this word's
+    // audio — wait for its write to land instead of fetching it a second time.
+    if pron_in_flight(sl, &canonical) {
+        for _ in 0..20 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if let Some(bytes) = with_db(&state, |conn| {
+                db::select_pron(conn, sl, "ko", &canonical, acc)
+            })
+            .map_err(err)?
+            {
+                return Ok(bytes);
+            }
+            if !pron_in_flight(sl, &canonical) {
+                break;
+            }
+        }
+    }
+
     let Some(result) = naver::lookup(&word, dict).await.map_err(err)? else {
         return Ok(Vec::new());
     };
@@ -572,7 +669,7 @@ pub async fn ensure_pron(
 
 /// Return the current user settings.
 #[tauri::command]
-pub fn get_settings(state: State<'_, AppState>) -> Settings {
+pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
     settings_snapshot(&state)
 }
 
@@ -584,8 +681,8 @@ pub fn save_settings(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    crate::settings::save(&state.settings_path, &settings).map_err(err)?;
-
+    // Validate and apply the new DB path BEFORE anything is persisted: a bad
+    // path written to disk would make every subsequent launch fail to open it.
     let new_db = resolve_db_path(&settings, &state.data_dir);
     {
         let mut current = state
@@ -602,21 +699,45 @@ pub fn save_settings(
         }
     }
 
+    let previous_hotkey = state
+        .settings
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_string())?
+        .hotkey
+        .clone();
+
+    // A hotkey that fails to register must not be persisted either — restore
+    // the previous working one and report the failure to the frontend.
     #[cfg(desktop)]
-    {
+    let hotkey_error = {
         use tauri::Manager;
-        crate::apply_hotkey(&app, &settings.hotkey);
+        let result = crate::apply_hotkey(&app, &settings.hotkey);
+        if result.is_err() {
+            let _ = crate::apply_hotkey(&app, &previous_hotkey);
+        }
         if let Some(window) = app.get_webview_window("main") {
             let _ = window.set_always_on_top(settings.always_on_top);
         }
-    }
+        result.err()
+    };
+    #[cfg(not(desktop))]
+    let hotkey_error: Option<String> = None;
     let _ = &app;
 
+    let mut to_save = settings;
+    if hotkey_error.is_some() {
+        to_save.hotkey = previous_hotkey;
+    }
+    crate::settings::save(&state.settings_path, &to_save).map_err(err)?;
     *state
         .settings
         .lock()
-        .map_err(|_| "settings lock poisoned".to_string())? = settings;
-    Ok(())
+        .map_err(|_| "settings lock poisoned".to_string())? = to_save;
+
+    match hotkey_error {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 fn with_db<T>(

@@ -81,23 +81,31 @@ async fn get_json(url: &str, referer: &str) -> anyhow::Result<Value> {
 fn clean(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut in_tag = false;
+    // Chars consumed since the last '<', so an unterminated tag (truncated
+    // API fragment) can be emitted back as text instead of swallowed.
+    let mut tag_buf = String::new();
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
-            '<' => {
+            '<' if !in_tag => {
                 // Only treat `<letter...>` / `</letter...>` as a tag, matching the v1 regex.
                 let is_tag =
                     matches!(chars.peek(), Some(n) if n.is_ascii_alphabetic() || *n == '/');
                 if is_tag {
                     in_tag = true;
+                    tag_buf.clear();
                 } else {
                     out.push(c);
                 }
             }
             '>' if in_tag => in_tag = false,
-            _ if in_tag => {}
+            _ if in_tag => tag_buf.push(c),
             _ => out.push(c),
         }
+    }
+    if in_tag {
+        out.push('<');
+        out.push_str(&tag_buf);
     }
     out.trim().to_string()
 }
@@ -379,10 +387,20 @@ fn item_headword(item: &Value) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Collect up to `max` `(entryId, headword)` pairs from a search response, in
-/// result order. A kana reading (かえる) returns several homophone hits here;
-/// items missing a usable headword are skipped.
-fn extract_search_items(search: &Value, max: usize) -> Vec<(String, String)> {
+/// One usable hit from a search response: the entry to fetch, the headword to
+/// display, and the search item's `meansCollector` so a cross-reference entry
+/// (whose detail JSON has no gloss of its own) can still build a definition.
+#[derive(Debug, Clone, PartialEq)]
+struct SearchItem {
+    entry_id: String,
+    headword: String,
+    means_collector: Option<Value>,
+}
+
+/// Collect up to `max` search items in result order. A kana reading (かえる)
+/// returns several homophone hits here; items missing a usable headword are
+/// skipped.
+fn extract_search_items(search: &Value, max: usize) -> Vec<SearchItem> {
     let Some(items) = search
         .pointer("/searchResultMap/searchResultListMap/WORD/items")
         .and_then(Value::as_array)
@@ -404,7 +422,11 @@ fn extract_search_items(search: &Value, max: usize) -> Vec<(String, String)> {
         // so the group never shows the same headword — and its cache row — twice.
         if let (Some(id), Some(head)) = (entry_id, item_headword(item)) {
             if seen.insert(head.clone()) {
-                out.push((id, head));
+                out.push(SearchItem {
+                    entry_id: id,
+                    headword: head,
+                    means_collector: item.get("meansCollector").cloned(),
+                });
             }
         }
     }
@@ -413,17 +435,17 @@ fn extract_search_items(search: &Value, max: usize) -> Vec<(String, String)> {
 
 /// Fetch one entry's detail JSON and build its `NaverResult`, or `None` when the
 /// entry has no usable definition.
-async fn fetch_entry(entry_id: &str, headword: String, dict: Dict) -> Option<NaverResult> {
-    let entry_url = format!("{}?entryId={entry_id}", dict.entry_url());
+async fn fetch_entry(item: SearchItem, dict: Dict) -> Option<NaverResult> {
+    let entry_url = format!("{}?entryId={}", dict.entry_url(), item.entry_id);
     let detail = get_json(&entry_url, dict.referer()).await.ok()?;
     let entry = detail.get("entry").unwrap_or(&Value::Null);
-    let definition = build_definition(entry, None);
+    let definition = build_definition(entry, item.means_collector.as_ref());
     if definition.is_empty() {
         return None;
     }
     let (pron_us_url, pron_uk_url) = extract_pron_urls(entry, dict);
     Some(NaverResult {
-        headword,
+        headword: item.headword,
         definition,
         pron_us_url,
         pron_uk_url,
@@ -450,7 +472,7 @@ pub async fn lookup_reading(
     // the grouped result keeps Naver's relevance ranking.
     let handles: Vec<_> = items
         .into_iter()
-        .map(|(id, head)| tokio::spawn(async move { fetch_entry(&id, head, dict).await }))
+        .map(|item| tokio::spawn(async move { fetch_entry(item, dict).await }))
         .collect();
     let mut out = Vec::new();
     for handle in handles {
@@ -538,11 +560,15 @@ const US_TTS_SPEAKER: &str = "clara";
 /// name; `vcode` is appended when present to match the exact voice clip.
 fn naver_tts_url(entry: &Value, speaker: &str) -> Option<String> {
     let member = entry.pointer("/members/0")?;
-    let text = ["tts_entry_name", "show_full_name"]
-        .iter()
-        .find_map(|k| member.get(*k).and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|s| !s.is_empty())?;
+    // Filter inside find_map so a present-but-blank tts_entry_name still
+    // falls through to show_full_name (same pattern as pron_file above).
+    let text = ["tts_entry_name", "show_full_name"].iter().find_map(|k| {
+        member
+            .get(*k)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    })?;
     let mut url = format!(
         "https://en.dict.naver.com/api/nvoice?speaker={speaker}&service=dictionary&speech_fmt=mp3&text={}",
         urlencoding::encode(text)
@@ -636,9 +662,15 @@ mod tests {
         let items = extract_search_items(&search, 5);
         assert_eq!(items.len(), 2);
         // 첫 한자 표기를 클릭/표시·캐시 키로 쓴다(帰る·還る -> 帰る).
-        assert_eq!(items[0], ("1".to_string(), "帰る".to_string()));
+        assert_eq!(
+            (items[0].entry_id.as_str(), items[0].headword.as_str()),
+            ("1", "帰る")
+        );
         // entryId가 숫자로 와도 문자열로 정규화된다.
-        assert_eq!(items[1], ("2".to_string(), "変える".to_string()));
+        assert_eq!(
+            (items[1].entry_id.as_str(), items[1].headword.as_str()),
+            ("2", "変える")
+        );
     }
 
     #[test]
@@ -653,8 +685,14 @@ mod tests {
         });
         let items = extract_search_items(&search, 5);
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0], ("1".to_string(), "帰る".to_string()));
-        assert_eq!(items[1], ("3".to_string(), "変える".to_string()));
+        assert_eq!(
+            (items[0].entry_id.as_str(), items[0].headword.as_str()),
+            ("1", "帰る")
+        );
+        assert_eq!(
+            (items[1].entry_id.as_str(), items[1].headword.as_str()),
+            ("3", "変える")
+        );
     }
 
     #[test]
@@ -666,7 +704,7 @@ mod tests {
             ]}}}
         });
         let items = extract_search_items(&search, 5);
-        assert_eq!(items[0].1, "カット");
+        assert_eq!(items[0].headword, "カット");
     }
 
     #[test]
@@ -681,8 +719,24 @@ mod tests {
         });
         let items = extract_search_items(&search, 2);
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0].1, "帰る");
-        assert_eq!(items[1].1, "返る"); // headless 항목은 제외하고 채운다
+        assert_eq!(items[0].headword, "帰る");
+        assert_eq!(items[1].headword, "返る"); // headless 항목은 제외하고 채운다
+    }
+
+    #[test]
+    fn extract_search_items_carries_means_collector() {
+        // 교차참조형 항목(뜻이 meansCollector에만 있음)이 동음이의어 그룹에서
+        // 조용히 누락되지 않도록, 검색 항목의 meansCollector를 상세 조회까지 나른다.
+        let mc = serde_json::json!([{ "means": [{ "value": "recap 참조" }] }]);
+        let search = serde_json::json!({
+            "searchResultMap": { "searchResultListMap": { "WORD": { "items": [
+                { "entryId": "1", "expKanji": "帰る", "meansCollector": mc.clone() },
+                { "entryId": "2", "expKanji": "変える" }
+            ]}}}
+        });
+        let items = extract_search_items(&search, 5);
+        assert_eq!(items[0].means_collector, Some(mc));
+        assert_eq!(items[1].means_collector, None);
     }
 
     #[test]
@@ -697,6 +751,15 @@ mod tests {
         assert_eq!(clean("  spaced  "), "spaced");
         // A bare "<" that is not a tag should survive.
         assert_eq!(clean("a < b"), "a < b");
+    }
+
+    #[test]
+    fn clean_keeps_text_after_unterminated_tag() {
+        // 잘린 API 응답 등으로 태그가 닫히지 않으면 나머지 본문을 버리지 말고 살린다.
+        assert_eq!(
+            clean("before <b>bold</b> after <trunc rest of gloss"),
+            "before bold after <trunc rest of gloss"
+        );
     }
 
     #[test]
@@ -720,6 +783,24 @@ mod tests {
         assert!(us.contains("vcode=565825"), "vcode 누락: {us}");
         // 녹음이 있는 영국식은 파일을 그대로 쓴다.
         assert_eq!(uk.as_deref(), Some("https://dict.example/uk.mp3"));
+    }
+
+    #[test]
+    fn tts_falls_back_to_show_full_name_when_tts_entry_name_is_blank() {
+        // 실서버는 tts_entry_name을 빈 문자열로 주기도 한다(expKanji: "" 와 같은 패턴).
+        // 그 경우 show_full_name으로 폴백해야 TTS 합성이 살아난다.
+        let entry = serde_json::json!({
+            "members": [{
+                "tts_entry_name": "",
+                "show_full_name": "seashore",
+                "prons": [
+                    { "pron_type": "A", "pron_symbol": "ˈsiːʃɔː(r)" }
+                ]
+            }]
+        });
+        let (us, _) = extract_pron_urls(&entry, Dict::Enko);
+        let us = us.expect("빈 tts_entry_name에서 show_full_name 폴백이 없음");
+        assert!(us.contains("text=seashore"), "표제어 누락: {us}");
     }
 
     #[test]

@@ -7,6 +7,7 @@ import { rowMove, type ChipRect } from "./lib/chipGrid";
 import { resolveActionKey, type ActionKey } from "./lib/actionKeys";
 import { isTranslateAltKey, isNewlineKey } from "./lib/hotkey";
 import { playPron, speakTts, setPronVolume } from "./lib/audio";
+import { createLatestRequestGuard } from "./lib/latestRequest";
 import { useSuggest } from "./hooks/useSuggest";
 import { useSettings } from "./hooks/useSettings";
 import { useTheme } from "./hooks/useTheme";
@@ -88,6 +89,9 @@ function App() {
       () => {},
     );
   const runActionRef = useRef<(e: globalThis.KeyboardEvent) => void>(() => {});
+  // Identity of the newest lookup, so a slow stale response can't overwrite
+  // the result of a newer search (or of a cleared input).
+  const lookupGuard = useRef(createLatestRequestGuard()).current;
 
   const suggestEnabled = !dismissed && isEnglishWordFragment(query);
   const suggestions = useSuggest(query, suggestEnabled, settings.suggestMinLength);
@@ -108,12 +112,14 @@ function App() {
   }, [rankedSuggestions]);
 
   // Clearing the input drops the stale result so re-typing a fresh word doesn't
-  // flash the previously searched entry.
+  // flash the previously searched entry — including a lookup still in flight.
   useEffect(() => {
     if (query.trim() === "") {
+      lookupGuard.invalidate();
       setResult(null);
+      setLoading(false);
     }
-  }, [query]);
+  }, [query, lookupGuard]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -142,8 +148,15 @@ function App() {
 
   // Global shortcut events from the backend.
   useEffect(() => {
+    // listen() resolves asynchronously, so a StrictMode remount could briefly
+    // leave the first registration alive; the flag mutes it until its
+    // unlisten resolves.
+    let cancelled = false;
     // Short press: focus and select the input so it can be overtyped.
     const showP = listen("show-window", () => {
+      if (cancelled) {
+        return;
+      }
       const el = inputRef.current;
       if (el) {
         el.focus();
@@ -152,6 +165,9 @@ function App() {
     });
     // Long press: the backend copied the foreground selection — search it.
     const searchP = listen<string>("show-window-search", (e) => {
+      if (cancelled) {
+        return;
+      }
       const text = (e.payload || "").trim();
       inputRef.current?.focus();
       if (text) {
@@ -160,6 +176,7 @@ function App() {
       }
     });
     return () => {
+      cancelled = true;
       showP.then((off) => off());
       searchP.then((off) => off());
     };
@@ -195,10 +212,16 @@ function App() {
     if (!trimmed) {
       return;
     }
+    const requestId = lookupGuard.begin();
     setDismissed(true);
     setLoading(true);
     try {
       const res = await lookup(trimmed, force, alt, single);
+      // A newer lookup started (or the input was cleared) while this one was
+      // in flight — its response owns the UI, not ours.
+      if (!lookupGuard.isCurrent(requestId)) {
+        return;
+      }
       setResult(res);
       autoPlay(res);
       if (res.kind !== "empty") {
@@ -209,9 +232,13 @@ function App() {
         }
       }
     } catch {
-      setResult(EMPTY_RESULT(trimmed));
+      if (lookupGuard.isCurrent(requestId)) {
+        setResult(EMPTY_RESULT(trimmed));
+      }
     } finally {
-      setLoading(false);
+      if (lookupGuard.isCurrent(requestId)) {
+        setLoading(false);
+      }
     }
   }
   runLookupRef.current = runLookup;

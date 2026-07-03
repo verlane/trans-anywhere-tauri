@@ -29,7 +29,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 anyhow = "1"
 thiserror = "2"
 urlencoding = "2"
@@ -41,6 +41,11 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-window-state = "2"
 enigo = "0.3"
 arboard = "3"
+
+# Windows-only: polls the physical key state so the long-press auto-repeat
+# guards are dropped exactly when the hotkey is released (see keyguard.rs).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse"] }
 
 [dev-dependencies]
 tempfile = "3"

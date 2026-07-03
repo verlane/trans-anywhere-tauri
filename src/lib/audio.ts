@@ -1,7 +1,10 @@
 import { ensurePron, type Accent } from "./api";
+import { createLatestRequestGuard } from "./latestRequest";
 
 let audioCtx: AudioContext | null = null;
 let currentSource: AudioBufferSourceNode | null = null;
+/** Drops a recorded playback whose network fetch lost to a newer request. */
+const playGuard = createLatestRequestGuard();
 /** Playback gain (0.0-1.0). Updated from settings via `setPronVolume`. */
 let pronVolume = 1;
 
@@ -25,10 +28,27 @@ function soundStart(buffer: AudioBuffer, threshold = 0.012): number {
   return 0;
 }
 
+/** Stop any playing recorded audio AND cancel any in-progress browser TTS.
+ *  Recorded and TTS playback must silence each other — a TTS word followed by
+ *  a recorded word (or vice versa) must not play both at once. */
+export function stopAllAudio(): void {
+  playGuard.invalidate();
+  try {
+    currentSource?.stop();
+  } catch {
+    // previous source already finished
+  }
+  currentSource = null;
+  window.speechSynthesis?.cancel();
+}
+
 /** Play a word's recorded pronunciation, trimming any leading silence. */
 export async function playPron(word: string, accent: Accent): Promise<void> {
+  stopAllAudio();
+  const requestId = playGuard.begin();
   const bytes = await ensurePron(word, accent);
-  if (!bytes) {
+  // A newer playback started while this word's audio was being fetched.
+  if (!bytes || !playGuard.isCurrent(requestId)) {
     return;
   }
   try {
@@ -39,10 +59,8 @@ export async function playPron(word: string, accent: Accent): Promise<void> {
       await audioCtx.resume();
     }
     const buffer = await audioCtx.decodeAudioData(bytes.slice().buffer);
-    try {
-      currentSource?.stop();
-    } catch {
-      // previous source already finished
+    if (!playGuard.isCurrent(requestId)) {
+      return;
     }
     const source = audioCtx.createBufferSource();
     source.buffer = buffer;
@@ -59,11 +77,11 @@ export async function playPron(word: string, accent: Accent): Promise<void> {
 
 /** Speak text with the browser's TTS when Naver has no recording (e.g. many Japanese words). */
 export function speakTts(text: string, lang: string): void {
+  stopAllAudio();
   const synth = window.speechSynthesis;
   if (!synth) {
     return;
   }
-  synth.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = lang === "ja" ? "ja-JP" : lang === "en" ? "en-US" : lang || "en-US";
   utterance.volume = pronVolume;
