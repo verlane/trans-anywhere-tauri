@@ -226,7 +226,12 @@ fn copy_selection() {
         let _ = enigo.key(Key::Shift, Release);
         let _ = enigo.key(Key::Meta, Release);
         std::thread::sleep(std::time::Duration::from_millis(20));
-        let _ = enigo.key(Key::Unicode('c'), Click);
+        // A real VK_C press, NOT Key::Unicode('c'): unicode injection arrives
+        // as VK_PACKET, which the Ctrl+C accelerator handling of most apps
+        // never matches — the copy silently does nothing. (v1's AutoHotkey
+        // `Send ^c` always sent the real virtual key.)
+        const VK_C: u32 = 0x43;
+        let _ = enigo.key(Key::Other(VK_C), Click);
         let _ = enigo.key(Key::Control, Release);
     }
 }
