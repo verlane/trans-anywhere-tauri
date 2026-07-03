@@ -331,6 +331,28 @@ mod tests {
     }
 
     #[test]
+    fn re_upserting_definition_preserves_existing_pronunciation() {
+        // 강제 새로고침/그룹 재구축 등으로 정의를 다시 캐시해도 이미 받아둔
+        // 발음 BLOB(media1/media2)은 지워지면 안 된다. media_tried=1과 결합하면
+        // 지워진 발음은 영영 재다운로드되지 않기 때문.
+        let conn = mem();
+        upsert_entry(&conn, "en", "ko", "run", "달리다", None).unwrap();
+        update_pron(&conn, "en", "ko", "run", Accent::Us, &[1, 2, 3]).unwrap();
+        update_pron(&conn, "en", "ko", "run", Accent::Uk, &[4, 5]).unwrap();
+
+        upsert_entry(&conn, "en", "ko", "run", "달리다 (갱신)", None).unwrap();
+
+        let entry = select_entry(&conn, "en", "ko", "run").unwrap().unwrap();
+        assert_eq!(entry.definition, "달리다 (갱신)");
+        assert!(entry.has_us, "재캐시가 US 발음을 지웠다");
+        assert!(entry.has_uk, "재캐시가 UK 발음을 지웠다");
+        assert_eq!(
+            select_pron(&conn, "en", "ko", "run", Accent::Us).unwrap(),
+            Some(vec![1, 2, 3])
+        );
+    }
+
+    #[test]
     fn insert_then_select_roundtrip() {
         let conn = mem();
         upsert_entry(&conn, "en", "ko", "present", "현재의", Some(&[1, 2, 3])).unwrap();
