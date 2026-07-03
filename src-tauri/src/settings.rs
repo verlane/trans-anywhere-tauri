@@ -125,8 +125,9 @@ impl Default for Settings {
     }
 }
 
-/// Clamp the numeric fields into their valid ranges. Guards against hand-edited
-/// or legacy settings files carrying out-of-range values.
+/// Clamp the numeric fields into their valid ranges and normalize string
+/// fields. Guards against hand-edited or legacy settings files carrying
+/// out-of-range or padded values.
 fn sanitize(mut s: Settings) -> Settings {
     s.suggest_min_length = s
         .suggest_min_length
@@ -139,22 +140,43 @@ fn sanitize(mut s: Settings) -> Settings {
         s.theme = default_theme();
     }
     s.text_scale = s.text_scale.clamp(MIN_TEXT_SCALE, MAX_TEXT_SCALE);
+    s.db_path = s.db_path.trim().to_string();
+    s.hotkey = s.hotkey.trim().to_string();
     s
 }
 
-/// Load settings from disk, falling back to defaults on a missing or invalid file.
+/// Load settings from disk, falling back to defaults on a missing or invalid
+/// file. A file that exists but fails to parse (e.g. truncated by a crash
+/// mid-write) is kept next to the original as `settings.json.bak` so the
+/// user's configuration is recoverable instead of silently reset.
 pub fn load(path: &Path) -> Settings {
-    let settings = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default();
+    let settings = match std::fs::read_to_string(path) {
+        Ok(raw) => match serde_json::from_str(&raw) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                eprintln!(
+                    "[settings] {} is corrupt ({e}); backing it up",
+                    path.display()
+                );
+                let mut backup = path.as_os_str().to_owned();
+                backup.push(".bak");
+                let _ = std::fs::rename(path, &backup);
+                Settings::default()
+            }
+        },
+        Err(_) => Settings::default(),
+    };
     sanitize(settings)
 }
 
-/// Persist settings as pretty JSON.
+/// Persist settings as pretty JSON. Written to a temp file first and renamed
+/// over the target so a crash mid-write can never leave a truncated file.
 pub fn save(path: &Path, settings: &Settings) -> anyhow::Result<()> {
     let json = serde_json::to_string_pretty(settings)?;
-    std::fs::write(path, json)?;
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    std::fs::write(&tmp, json)?;
+    std::fs::rename(&tmp, path)?;
     Ok(())
 }
 
@@ -248,7 +270,11 @@ mod tests {
     fn load_trims_whitespace_in_db_path_and_hotkey() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
-        std::fs::write(&path, r#"{ "db_path": "  /data/x.db  ", "hotkey": " Alt+W " }"#).unwrap();
+        std::fs::write(
+            &path,
+            r#"{ "db_path": "  /data/x.db  ", "hotkey": " Alt+W " }"#,
+        )
+        .unwrap();
         let s = load(&path);
         assert_eq!(s.db_path, "/data/x.db");
         assert_eq!(s.hotkey, "Alt+W");
