@@ -3,8 +3,8 @@ mod commands;
 mod db;
 mod google;
 mod http;
-#[cfg(all(desktop, windows))]
-mod keyhook;
+#[cfg(desktop)]
+mod keyguard;
 mod lang;
 mod naver;
 mod selection;
@@ -58,6 +58,13 @@ static HOTKEY: std::sync::Mutex<HotkeyState> = std::sync::Mutex::new(HotkeyState
 static SELECTION_IN_FLIGHT: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// The currently registered show-window shortcut. The global handler ignores
+/// every other shortcut — the temporary auto-repeat guards registered during
+/// a long press (e.g. bare "W") must not drive the press state machine.
+#[cfg(desktop)]
+static MAIN_SHORTCUT: std::sync::Mutex<Option<tauri_plugin_global_shortcut::Shortcut>> =
+    std::sync::Mutex::new(None);
+
 /// Debounce counter for persisting window geometry: every move/resize bumps it,
 /// and a save only fires once the value is unchanged after a short delay.
 #[cfg(desktop)]
@@ -101,11 +108,18 @@ const COPY_SENTINEL: &str = "\u{1}__transanywhere_no_selection__\u{1}";
 #[cfg(desktop)]
 fn show_main_with_selection(app: &tauri::AppHandle) {
     use tauri::Emitter;
-    // The user is still holding the hotkey. Swallow its main key's hardware
-    // auto-repeat before any modifier is synthesized up — otherwise a held W
-    // types "wwww" (or closes a tab as Ctrl+W) the moment Alt goes up.
-    #[cfg(windows)]
-    keyhook::suppress_hotkey_key_until_release();
+    use tauri::Manager;
+    // The user is still holding the hotkey. Its main key's hardware
+    // auto-repeat must be consumed before any modifier is synthesized up —
+    // otherwise a held W types "wwww" (or closes a tab as Ctrl+W) the moment
+    // Alt goes up.
+    let hotkey = app
+        .state::<AppState>()
+        .settings
+        .lock()
+        .map(|s| s.hotkey.clone())
+        .unwrap_or_default();
+    let guards = register_repeat_guards(app, &hotkey);
     let backup = backup_clipboard();
     set_clipboard(COPY_SENTINEL);
     copy_selection();
@@ -128,6 +142,60 @@ fn show_main_with_selection(app: &tauri::AppHandle) {
             let _ = app.emit("show-window", ());
         }
     }
+    release_repeat_guards(app, guards, &hotkey);
+}
+
+/// Temporarily register the hotkey's bare main key (and Ctrl+key, covering
+/// the window where our simulated Ctrl is down) as global shortcuts, so its
+/// hardware auto-repeat is consumed by the OS instead of typed into the
+/// focused window once the hotkey's modifiers are synthesized up. Their
+/// events are ignored by the handler via MAIN_SHORTCUT.
+#[cfg(desktop)]
+fn register_repeat_guards(
+    app: &tauri::AppHandle,
+    hotkey: &str,
+) -> Vec<tauri_plugin_global_shortcut::Shortcut> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let Some(token) = keyguard::main_key_token(hotkey) else {
+        return Vec::new();
+    };
+    let gs = app.global_shortcut();
+    let mut guards = Vec::new();
+    for spec in [token.clone(), format!("Ctrl+{token}")] {
+        match spec.parse::<tauri_plugin_global_shortcut::Shortcut>() {
+            Ok(shortcut) => match gs.register(shortcut) {
+                Ok(()) => guards.push(shortcut),
+                Err(e) => eprintln!("[keyguard] register '{spec}' failed: {e}"),
+            },
+            Err(e) => eprintln!("[keyguard] parse '{spec}' failed: {e}"),
+        }
+    }
+    eprintln!("[keyguard] {} repeat guard(s) registered", guards.len());
+    guards
+}
+
+/// Drop the auto-repeat guards once the hotkey's main key is physically
+/// released (never earlier — as long as the key is down it keeps repeating).
+#[cfg(desktop)]
+fn release_repeat_guards(
+    app: &tauri::AppHandle,
+    guards: Vec<tauri_plugin_global_shortcut::Shortcut>,
+    hotkey: &str,
+) {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    if guards.is_empty() {
+        return;
+    }
+    let vk = keyguard::main_key_vk(hotkey).unwrap_or(0);
+    let app = app.clone();
+    std::thread::spawn(move || {
+        keyguard::wait_until_released(vk, std::time::Duration::from_secs(10));
+        let gs = app.global_shortcut();
+        for shortcut in guards {
+            let _ = gs.unregister(shortcut);
+        }
+        eprintln!("[keyguard] repeat guards released");
+    });
 }
 
 /// Simulate Ctrl+C to copy the foreground app's current selection.
@@ -221,6 +289,9 @@ pub fn apply_hotkey(app: &tauri::AppHandle, hotkey: &str) -> Result<(), String> 
     let _ = gs.unregister_all();
     let trimmed = hotkey.trim();
     if trimmed.is_empty() {
+        if let Ok(mut main) = MAIN_SHORTCUT.lock() {
+            *main = None;
+        }
         return Ok(());
     }
     let shortcut = trimmed
@@ -228,8 +299,9 @@ pub fn apply_hotkey(app: &tauri::AppHandle, hotkey: &str) -> Result<(), String> 
         .map_err(|e| format!("invalid hotkey '{trimmed}': {e}"))?;
     gs.register(shortcut)
         .map_err(|e| format!("failed to register hotkey '{trimmed}': {e}"))?;
-    #[cfg(windows)]
-    keyhook::remember_hotkey(trimmed);
+    if let Ok(mut main) = MAIN_SHORTCUT.lock() {
+        *main = Some(shortcut);
+    }
     Ok(())
 }
 
@@ -242,9 +314,19 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder.plugin(
         tauri_plugin_global_shortcut::Builder::new()
-            .with_handler(|app, _shortcut, event| {
+            .with_handler(|app, shortcut, event| {
                 use std::sync::atomic::Ordering;
                 use tauri_plugin_global_shortcut::ShortcutState;
+                // Only the configured show-window shortcut drives the press
+                // state machine; the temporary auto-repeat guards (bare "W",
+                // "Ctrl+W") registered during a long press are consume-only.
+                let is_main = MAIN_SHORTCUT
+                    .lock()
+                    .map(|m| m.as_ref() == Some(shortcut))
+                    .unwrap_or(false);
+                if !is_main {
+                    return;
+                }
                 match event.state() {
                     ShortcutState::Pressed => {
                         // Ignore key auto-repeat and presses while a previous
