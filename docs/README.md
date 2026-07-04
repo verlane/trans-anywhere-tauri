@@ -7,6 +7,7 @@
 | --- | --- |
 | `screenshot-lookup.png` | 영어 사전 검색 (라이트 테마). |
 | `screenshot-lookup-dark.png` | 영어 사전 검색 (다크 테마). |
-| `screenshot-translate.png` | Google 번역으로 문장을 번역한 화면. |
+| `screenshot-translate.png` | Google 번역으로 문장을 번역한 화면 (라이트 테마). |
+| `screenshot-translate-dark.png` | Google 번역으로 문장을 번역한 화면 (다크 테마). |
 
 권장: 앱 기본 창 크기에서 깔끔한 배경으로 캡처, PNG 형식.
