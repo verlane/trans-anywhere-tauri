@@ -28,11 +28,18 @@
 
 ## 스크린샷
 
-> 스크린샷은 준비 중입니다 — [`docs/`](docs/) 참고.
-
-| 사전 검색 | 문장 번역 |
+| 사전 검색 (라이트) | 사전 검색 (다크) |
 | :---: | :---: |
-| ![사전 검색](docs/screenshot-lookup.png) | ![문장 번역](docs/screenshot-translate.png) |
+| ![사전 검색 라이트 테마](docs/screenshot-lookup.png) | ![사전 검색 다크 테마](docs/screenshot-lookup-dark.png) |
+
+단어를 찾으면 정의·예문·발음이 함께 뜨고, 예문 위의 파생어에 마우스를 올리면 뜻이
+미리 보기로 나옵니다. 테마는 라이트·다크·시스템을 따릅니다.
+
+| 문장 번역 |
+| :---: |
+| ![문장 번역](docs/screenshot-translate.png) |
+
+문장을 입력하면 사전 대신 Google 번역으로 결과를 보여줍니다.
 
 ## 주요 기능
 
