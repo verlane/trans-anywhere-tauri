@@ -30,7 +30,12 @@ export function RecentChips({ items, activeIndex, listRef, onPick, onRemove }: R
             className={i === activeIndex ? "recent__chip recent__chip--active" : "recent__chip"}
             aria-selected={i === activeIndex}
           >
-            <button type="button" className="recent__chip-text" onClick={() => onPick(term)}>
+            <button
+              type="button"
+              className="recent__chip-text"
+              onClick={() => onPick(term)}
+              title={term}
+            >
               {term}
             </button>
             <button

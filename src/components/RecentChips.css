@@ -21,6 +21,7 @@
 .recent__chip {
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
   background: var(--color-accent-soft);
   border-radius: 99px;
   overflow: hidden;
@@ -40,6 +41,9 @@
   padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
   cursor: pointer;
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .recent__chip-x {
@@ -51,6 +55,7 @@
   padding: var(--space-1) var(--space-2) var(--space-1) 0;
   cursor: pointer;
   opacity: 0.55;
+  flex-shrink: 0;
   transition: opacity var(--duration) var(--ease);
 }
 
