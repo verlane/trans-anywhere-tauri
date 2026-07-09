@@ -33,6 +33,7 @@ src-tauri/.cargo/config.toml
 .dolt/
 *.db
 .beads-credential-key
+.beads/issues.jsonl
 
 # MSYS/Cygwin bash crash dumps
 *.stackdump
