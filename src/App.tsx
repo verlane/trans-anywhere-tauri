@@ -86,6 +86,12 @@ function App() {
   const chipsRef = useRef<HTMLDivElement>(null);
   // Remembered across FavoritesPanel unmount/remount (the panel unmounts on close).
   const favScrollRef = useRef(0);
+  // The literal text last sent to the lookup command for the current result.
+  // Refresh must reuse this, not result.text: the backend may display a
+  // resolved headword that differs from what was searched (e.g. a stale
+  // cache alias), and refreshing under that wrong display text can never
+  // correct the original mapping.
+  const lastLookupTextRef = useRef("");
   const runLookupRef =
     useRef<(text: string, force?: boolean, alt?: boolean, fromNav?: boolean, single?: boolean) => void>(
       () => {},
@@ -224,6 +230,7 @@ function App() {
       if (!lookupGuard.isCurrent(requestId)) {
         return;
       }
+      lastLookupTextRef.current = trimmed;
       setResult(res);
       autoPlay(res);
       if (res.kind !== "empty") {
@@ -291,8 +298,16 @@ function App() {
       case "refresh":
         // Mirror the UI: refresh only applies to dictionary entries. Keep the
         // current mode — a group stays a group, a single drill-in stays single.
+        // Reuse the original search text (not result.text, the resolved
+        // display headword) so a stale cache mapping can actually self-heal.
         if (result.source === "naver" || result.source === "cache") {
-          runLookupRef.current(result.text, true, false, false, result.entries.length === 0);
+          runLookupRef.current(
+            lastLookupTextRef.current,
+            true,
+            false,
+            false,
+            result.entries.length === 0,
+          );
         }
         break;
     }
@@ -592,7 +607,10 @@ function App() {
           copied={copied}
           onCopy={copyResult}
           defaultAccent={result ? defaultAccentFor(result) : "us"}
-          onRefresh={() => result && runLookup(result.text, true, false, false, result.entries.length === 0)}
+          onRefresh={() =>
+            result &&
+            runLookup(lastLookupTextRef.current, true, false, false, result.entries.length === 0)
+          }
           onWordClick={(word) => {
             wordPreview.onLeave();
             setQuery(word);
