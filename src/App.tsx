@@ -84,6 +84,8 @@ function App() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const resultRef = useRef<HTMLElement>(null);
   const chipsRef = useRef<HTMLDivElement>(null);
+  // Remembered across FavoritesPanel unmount/remount (the panel unmounts on close).
+  const favScrollRef = useRef(0);
   const runLookupRef =
     useRef<(text: string, force?: boolean, alt?: boolean, fromNav?: boolean, single?: boolean) => void>(
       () => {},
@@ -624,6 +626,10 @@ function App() {
           }}
           onRemove={(term) => favorites.toggle(term)}
           onClose={() => setShowFavorites(false)}
+          initialScrollTop={favScrollRef.current}
+          onScroll={(top) => {
+            favScrollRef.current = top;
+          }}
         />
       )}
       {showSettings && (
