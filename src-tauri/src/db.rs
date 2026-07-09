@@ -258,6 +258,18 @@ pub fn resolve_key(conn: &Connection, sl: &str, tl: &str, key: &str) -> anyhow::
     Ok(select_alias(conn, sl, tl, key)?.unwrap_or_else(|| key.to_string()))
 }
 
+/// Remove a recorded alias, if any. Used to self-heal a stale mapping: if a
+/// fresh dictionary fetch resolves a key to itself (it is not an inflected
+/// form after all), any earlier alias pointing it elsewhere must not keep
+/// shadowing that key's own cache entry.
+pub fn delete_alias(conn: &Connection, sl: &str, tl: &str, alias: &str) -> anyhow::Result<()> {
+    conn.execute(
+        "DELETE FROM aliases WHERE source_language = ?1 AND target_language = ?2 AND alias = ?3",
+        params![sl, tl, alias],
+    )?;
+    Ok(())
+}
+
 /// Record the ordered homophone headwords a kana reading expands to (かえる ->
 /// 帰る/変える/...), so a later lookup of the reading can rebuild the group from
 /// cache without re-querying Naver. Each headword's definition lives in `entries`.
@@ -431,6 +443,26 @@ mod tests {
         upsert_alias(&conn, "en", "ko", "ran", "wrong").unwrap();
         upsert_alias(&conn, "en", "ko", "ran", "run").unwrap();
         assert_eq!(resolve_key(&conn, "en", "ko", "ran").unwrap(), "run");
+    }
+
+    #[test]
+    fn delete_alias_falls_back_to_key_itself() {
+        // 네이버가 한 번 잘못된 표제어로 별칭을 남겼다가(fossil -> dossil), 이후
+        // 새로 조회한 결과가 fossil 자신을 표제어로 확정하면 낡은 별칭을 지워야
+        // resolve_key가 더 이상 엉뚱한 캐시 행으로 새지 않는다.
+        let conn = mem();
+        upsert_alias(&conn, "en", "ko", "fossil", "dossil").unwrap();
+        assert_eq!(resolve_key(&conn, "en", "ko", "fossil").unwrap(), "dossil");
+
+        delete_alias(&conn, "en", "ko", "fossil").unwrap();
+        assert_eq!(resolve_key(&conn, "en", "ko", "fossil").unwrap(), "fossil");
+    }
+
+    #[test]
+    fn delete_alias_on_missing_alias_is_a_no_op() {
+        let conn = mem();
+        delete_alias(&conn, "en", "ko", "ghost").unwrap();
+        assert_eq!(resolve_key(&conn, "en", "ko", "ghost").unwrap(), "ghost");
     }
 
     #[test]

@@ -441,6 +441,15 @@ async fn lookup_dict_word(
             db::upsert_alias(conn, sl, "ko", &key_for_alias, &hw_for_alias)
         })
         .map_err(err)?;
+    } else {
+        // This fresh fetch confirms the word is its own headword. Clear any
+        // stale alias left by an earlier bad response, so it stops shadowing
+        // this key's own cache entry on future (non-force) lookups.
+        let key_for_cleanup = key.clone();
+        with_db(state, move |conn| {
+            db::delete_alias(conn, sl, "ko", &key_for_cleanup)
+        })
+        .map_err(err)?;
     }
 
     // 4. Download both pronunciation slots (media1/media2) in the background and
