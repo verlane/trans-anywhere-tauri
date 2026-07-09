@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { groupFavorites } from "../lib/groupFavorites";
 import type { FavoriteItem } from "../lib/favorites";
 import type { Lang } from "../lib/lang";
+import { clampScrollTop } from "../lib/scrollMemory";
 import "./FavoritesPanel.css";
 
 interface FavoritesPanelProps {
@@ -9,6 +10,10 @@ interface FavoritesPanelProps {
   onPick: (term: string) => void;
   onRemove: (term: string) => void;
   onClose: () => void;
+  /** Scroll position (px) to restore on mount, remembered from the last time this panel was open. */
+  initialScrollTop?: number;
+  /** Called on every scroll so the caller can remember the position across unmount/remount. */
+  onScroll?: (scrollTop: number) => void;
 }
 
 type Filter = Lang | "all";
@@ -17,9 +22,24 @@ type Filter = Lang | "all";
 const CHIP_LABELS: Record<Lang, string> = { en: "EN", ja: "JA", ko: "KO", other: "기타" };
 
 /** The word book: saved terms grouped by language, click to look up, ✕ to remove. */
-export function FavoritesPanel({ items, onPick, onRemove, onClose }: FavoritesPanelProps) {
+export function FavoritesPanel({
+  items,
+  onPick,
+  onRemove,
+  onClose,
+  initialScrollTop,
+  onScroll,
+}: FavoritesPanelProps) {
   const [filter, setFilter] = useState<Filter>("all");
+  const listRef = useRef<HTMLElement>(null);
   const groups = groupFavorites(items);
+
+  // Restore once on mount only; ongoing scroll position is reported via onScroll.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTop = clampScrollTop(initialScrollTop ?? 0, el.scrollHeight - el.clientHeight);
+  }, []);
   // Fall back to all groups if the active filter no longer has any words
   // (e.g. its last word was just removed).
   const filtered = filter === "all" ? groups : groups.filter((g) => g.lang === filter);
@@ -28,7 +48,12 @@ export function FavoritesPanel({ items, onPick, onRemove, onClose }: FavoritesPa
 
   return (
     <div className="fav-overlay" onClick={onClose}>
-      <aside className="fav" onClick={(e) => e.stopPropagation()}>
+      <aside
+        className="fav"
+        ref={listRef}
+        onClick={(e) => e.stopPropagation()}
+        onScroll={(e) => onScroll?.(e.currentTarget.scrollTop)}
+      >
         <header className="fav__head">
           <h2 className="fav__title">단어장</h2>
           <button type="button" className="fav__close" onClick={onClose} aria-label="닫기">
