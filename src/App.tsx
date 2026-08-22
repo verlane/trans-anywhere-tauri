@@ -651,7 +651,17 @@ function App() {
         />
       )}
       {showSettings && (
-        <SettingsPanel settings={settings} update={update} onClose={() => setShowSettings(false)} />
+        <SettingsPanel
+          settings={settings}
+          update={update}
+          favorites={favorites.items}
+          history={history.items}
+          onRestore={(items, terms) => {
+            favorites.replace(items);
+            history.replace(terms);
+          }}
+          onClose={() => setShowSettings(false)}
+        />
       )}
     </div>
   );

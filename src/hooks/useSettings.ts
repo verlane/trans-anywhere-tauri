@@ -1,24 +1,6 @@
 import { useEffect, useState } from "react";
 import { getSettings, saveSettings, type Settings } from "../lib/api";
-
-const FALLBACK: Settings = {
-  defaultAccentEn: "us",
-  defaultAccentJa: "us",
-  autoPlay: false,
-  suggestMinLength: 2,
-  suggestMaxResults: 20,
-  translateTarget: "ko",
-  translateTargetAlt: "ja",
-  translateFallback: "en",
-  minimizeToTray: false,
-  alwaysOnTop: false,
-  dbPath: "",
-  hotkey: "Alt+W",
-  pronVolume: 100,
-  theme: "system",
-  textScale: 100,
-  hoverPreview: true,
-};
+import { DEFAULT_SETTINGS } from "../lib/settingsDefaults";
 
 interface UseSettings {
   settings: Settings;
@@ -29,7 +11,7 @@ interface UseSettings {
 
 /** Load settings once and persist every change (optimistic in-memory update). */
 export function useSettings(): UseSettings {
-  const [settings, setSettings] = useState<Settings>(FALLBACK);
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {

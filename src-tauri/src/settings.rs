@@ -126,9 +126,10 @@ impl Default for Settings {
 }
 
 /// Clamp the numeric fields into their valid ranges and normalize string
-/// fields. Guards against hand-edited or legacy settings files carrying
-/// out-of-range or padded values.
-fn sanitize(mut s: Settings) -> Settings {
+/// fields. Guards against hand-edited or legacy settings files, and against an
+/// imported backup bundle, carrying out-of-range or padded values. Applied on
+/// both load and save so no path can persist a value the UI can't render.
+pub fn sanitize(mut s: Settings) -> Settings {
     s.suggest_min_length = s
         .suggest_min_length
         .clamp(MIN_SUGGEST_LENGTH, MAX_SUGGEST_LENGTH);

@@ -29,6 +29,8 @@ interface UseFavorites {
   items: FavoriteItem[];
   toggle: (term: string, gloss?: string) => void;
   has: (term: string) => boolean;
+  /** Swap the whole word book (restoring a backup). */
+  replace: (items: FavoriteItem[]) => void;
 }
 
 /** Saved words/phrases (the word book), persisted in localStorage. */
@@ -49,5 +51,9 @@ export function useFavorites(): UseFavorites {
     return isFavorite(items, term);
   }
 
-  return { items, toggle, has };
+  function replace(next: FavoriteItem[]) {
+    setItems(normalizeFavorites(next));
+  }
+
+  return { items, toggle, has, replace };
 }

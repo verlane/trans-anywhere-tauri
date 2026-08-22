@@ -102,6 +102,16 @@ export async function ensurePron(word: string, accent: Accent): Promise<Uint8Arr
   return bytes.length > 0 ? new Uint8Array(bytes) : null;
 }
 
+/** Write a backup bundle (built by `lib/backup.ts`) to `path`. */
+export async function writeBackup(path: string, contents: string): Promise<void> {
+  await invoke("export_backup", { path, contents });
+}
+
+/** Read back a bundle written by `writeBackup`; the caller parses it. */
+export async function readBackup(path: string): Promise<string> {
+  return invoke<string>("import_backup", { path });
+}
+
 export async function getSettings(): Promise<Settings> {
   const raw = await invoke<RawSettings>("get_settings");
   return {
