@@ -6,7 +6,7 @@
 
 단축키 하나로 어느 창에서든 단어를 찾아보려고 만든 작은 데스크톱 사전 앱입니다.
 
-[![version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/verlane/trans-anywhere-tauri/releases)
+[![version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/verlane/trans-anywhere-tauri/releases)
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB.svg?logo=tauri)](https://tauri.app/)
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg?logo=react)](https://react.dev/)
 [![Rust](https://img.shields.io/badge/Rust-backend-DEA584.svg?logo=rust)](https://www.rust-lang.org/)
