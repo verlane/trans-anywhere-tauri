@@ -572,7 +572,9 @@ pub fn run() {
             commands::lookup,
             commands::ensure_pron,
             commands::get_settings,
-            commands::save_settings
+            commands::save_settings,
+            commands::export_backup,
+            commands::import_backup
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

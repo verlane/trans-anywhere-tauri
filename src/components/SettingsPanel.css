@@ -198,6 +198,20 @@
   line-height: 1.5;
 }
 
+.settings__note {
+  font-size: 0.72rem;
+  color: var(--color-ink-soft);
+  word-break: break-all;
+}
+
+.settings__note--error {
+  color: var(--color-danger, #c0392b);
+}
+
+.settings__note--muted {
+  opacity: 0.75;
+}
+
 .settings__db-actions {
   display: flex;
   gap: var(--space-2);

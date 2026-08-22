@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { addTerm, removeTerm } from "../lib/history";
+import { addTerm, removeTerm, normalizeHistory } from "../lib/history";
 
 const KEY = "transanywhere.history";
 
@@ -24,6 +24,8 @@ interface UseHistory {
   items: string[];
   add: (term: string) => void;
   remove: (term: string) => void;
+  /** Swap the whole list (restoring a backup). */
+  replace: (items: string[]) => void;
 }
 
 /** Recent search terms, most-recent first, persisted in localStorage. */
@@ -44,5 +46,9 @@ export function useHistory(): UseHistory {
     setItems((prev) => removeTerm(prev, term));
   }
 
-  return { items, add, remove };
+  function replace(next: string[]) {
+    setItems(normalizeHistory(next));
+  }
+
+  return { items, add, remove, replace };
 }

@@ -1,6 +1,9 @@
 import { useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import type { Accent, Settings, ThemeMode } from "../lib/api";
+import { readBackup, writeBackup } from "../lib/api";
+import { buildBackup, defaultBackupName, parseBackup } from "../lib/backup";
+import type { FavoriteItem } from "../lib/favorites";
 import { captureHotkey, prettyHotkey, EDITOR_KEY } from "../lib/hotkey";
 import { ACTION_KEY } from "../lib/actionKeys";
 import "./SettingsPanel.css";
@@ -9,6 +12,11 @@ interface SettingsPanelProps {
   settings: Settings;
   /** Resolves to an error message (e.g. hotkey registration failure), or null. */
   update: (patch: Partial<Settings>) => Promise<string | null>;
+  /** Word book and recent searches, carried by the backup bundle. */
+  favorites: FavoriteItem[];
+  history: string[];
+  /** Replace the word book and recent searches from a restored bundle. */
+  onRestore: (favorites: FavoriteItem[], history: string[]) => void;
   onClose: () => void;
 }
 
@@ -135,13 +143,76 @@ function LangRow({ label, value, onChange }: LangRowProps) {
   );
 }
 
-export function SettingsPanel({ settings, update: rawUpdate, onClose }: SettingsPanelProps) {
+export function SettingsPanel({
+  settings,
+  update: rawUpdate,
+  favorites,
+  history,
+  onRestore,
+  onClose,
+}: SettingsPanelProps) {
   // A failed save (invalid DB path, hotkey the OS refused to register) must be
   // visible — the backend keeps the previous working value in those cases.
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Outcome of the last export/import, shown next to the backup buttons.
+  const [backupNote, setBackupNote] = useState<{ ok: boolean; text: string } | null>(null);
 
   function update(patch: Partial<Settings>) {
     rawUpdate(patch).then(setSaveError);
+  }
+
+  async function exportBackup() {
+    setBackupNote(null);
+    try {
+      const path = await save({
+        defaultPath: defaultBackupName(),
+        filters: [{ name: "TransAnywhere 백업", extensions: ["json"] }],
+      });
+      if (!path) {
+        return;
+      }
+      await writeBackup(path, buildBackup({ settings, favorites, history }));
+      setBackupNote({ ok: true, text: `내보냈습니다: ${path}` });
+    } catch (e) {
+      setBackupNote({ ok: false, text: `내보내기 실패: ${e}` });
+    }
+  }
+
+  async function importBackup() {
+    setBackupNote(null);
+    try {
+      const path = await open({
+        multiple: false,
+        filters: [{ name: "TransAnywhere 백업", extensions: ["json"] }],
+      });
+      if (typeof path !== "string") {
+        return;
+      }
+      // Parse before asking: a bad file should fail without threatening the
+      // current word book, and the counts make the confirmation concrete.
+      const bundle = parseBackup(await readBackup(path));
+      const summary = [
+        `설정 · 단어장 ${bundle.favorites.length}개 · 최근 검색 ${bundle.history.length}개를 불러옵니다.`,
+        "지금 저장된 내용은 덮어써집니다. 계속할까요?",
+      ].join("\n");
+      const ok = await confirm(summary, { title: "백업 가져오기", kind: "warning" });
+      if (!ok) {
+        return;
+      }
+      onRestore(bundle.favorites, bundle.history);
+      const error = await rawUpdate(bundle.settings);
+      setSaveError(error);
+      // The word book and history are restored either way, but a failed
+      // settings save must not be reported next to a plain success message.
+      setBackupNote({
+        ok: error === null,
+        text: error
+          ? `단어장 ${bundle.favorites.length}개 · 최근 검색 ${bundle.history.length}개는 가져왔지만, 설정 저장에 실패했습니다`
+          : `가져왔습니다: 단어장 ${bundle.favorites.length}개 · 최근 검색 ${bundle.history.length}개`,
+      });
+    } catch (e) {
+      setBackupNote({ ok: false, text: `가져오기 실패: ${e instanceof Error ? e.message : e}` });
+    }
   }
 
   async function pickDb() {
@@ -347,6 +418,31 @@ export function SettingsPanel({ settings, update: rawUpdate, onClose }: Settings
               </button>
             )}
           </div>
+        </div>
+
+        <div className="settings__row settings__row--stack">
+          <span className="settings__label">백업 (설정 · 단어장 · 최근 검색)</span>
+          <div className="settings__db-actions">
+            <button type="button" className="settings__btn" onClick={exportBackup}>
+              내보내기…
+            </button>
+            <button type="button" className="settings__btn" onClick={importBackup}>
+              가져오기…
+            </button>
+          </div>
+          {backupNote && (
+            <p
+              className={
+                backupNote.ok ? "settings__note" : "settings__note settings__note--error"
+              }
+              role="status"
+            >
+              {backupNote.text}
+            </p>
+          )}
+          <p className="settings__note settings__note--muted">
+            사전 DB와 DB 위치 설정은 포함되지 않습니다.
+          </p>
         </div>
 
         <div className="settings__row settings__row--stack settings__help">

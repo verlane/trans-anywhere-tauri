@@ -690,6 +690,11 @@ pub fn save_settings(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    // Clamp first: the settings UI bounds its own inputs, but an imported
+    // backup bundle reaches this command with whatever the file held, and an
+    // out-of-range value would drive the live UI until the next restart.
+    let settings = crate::settings::sanitize(settings);
+
     // Validate and apply the new DB path BEFORE anything is persisted: a bad
     // path written to disk would make every subsequent launch fail to open it.
     let new_db = resolve_db_path(&settings, &state.data_dir);
@@ -747,6 +752,62 @@ pub fn save_settings(
         Some(e) => Err(e),
         None => Ok(()),
     }
+}
+
+/// Largest backup bundle accepted on import. A backup holds settings, the word
+/// book and recent searches only (never the dictionary DB), so anything larger
+/// is a wrong file pick rather than a real backup.
+const MAX_BACKUP_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Reject a path that isn't a `.json` file. Both backup commands take a path
+/// the user chose in a native file dialog, but that's a calling convention the
+/// webview could sidestep; refusing every other extension keeps these commands
+/// from doubling as a general read/write primitive for arbitrary files.
+fn check_backup_path(path: &std::path::Path) -> Result<(), String> {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) if ext.eq_ignore_ascii_case("json") => Ok(()),
+        _ => Err("backup path must be a .json file".to_string()),
+    }
+}
+
+/// Write a settings/word-book backup bundle to `path`. Written to a temp file
+/// first and renamed over the target so a crash mid-write can't leave a
+/// truncated file where a good backup used to be. The temp name carries this
+/// process id so two concurrent exports to one path can't clobber each other.
+#[tauri::command]
+pub fn export_backup(path: String, contents: String) -> Result<(), String> {
+    let target = std::path::PathBuf::from(&path);
+    check_backup_path(&target)?;
+    let mut tmp = target.as_os_str().to_owned();
+    tmp.push(format!(".{}.tmp", std::process::id()));
+    std::fs::write(&tmp, contents).map_err(err)?;
+    if let Err(e) = std::fs::rename(&tmp, &target) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(err(e));
+    }
+    Ok(())
+}
+
+/// Read a backup bundle written by `export_backup`. The bundle format is owned
+/// by the frontend (`src/lib/backup.ts`), which parses and validates the text.
+/// The cap is enforced while reading rather than from `metadata` beforehand,
+/// so a file that grows between the two checks can't slip past it.
+#[tauri::command]
+pub fn import_backup(path: String) -> Result<String, String> {
+    use std::io::Read;
+    let target = std::path::PathBuf::from(&path);
+    check_backup_path(&target)?;
+    let file = std::fs::File::open(&target).map_err(err)?;
+    let mut text = String::new();
+    file.take(MAX_BACKUP_BYTES + 1)
+        .read_to_string(&mut text)
+        .map_err(err)?;
+    if text.len() as u64 > MAX_BACKUP_BYTES {
+        return Err(format!(
+            "file is too large for a backup (over {MAX_BACKUP_BYTES} bytes)"
+        ));
+    }
+    Ok(text)
 }
 
 fn with_db<T>(
@@ -880,5 +941,121 @@ mod tests {
         assert_eq!(resolve_target("ja", "ja", "en"), "en");
         // 목표와 대체가 모두 입력과 같으면 최후로 ko.
         assert_eq!(resolve_target("en", "en", "en"), "ko");
+    }
+
+    #[test]
+    fn backup_export_then_import_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backup.json");
+        let payload = r#"{"kind":"transanywhere.backup","favorites":["사과"]}"#;
+
+        export_backup(path.to_string_lossy().into_owned(), payload.to_string()).unwrap();
+        let read = import_backup(path.to_string_lossy().into_owned()).unwrap();
+
+        assert_eq!(read, payload);
+    }
+
+    #[test]
+    fn export_backup_leaves_no_temp_file_behind() {
+        // 임시 파일로 쓰고 rename 하므로, 성공 후 .tmp 가 남아 있으면 안 된다.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backup.json");
+        export_backup(path.to_string_lossy().into_owned(), "{}".to_string()).unwrap();
+
+        assert!(path.exists());
+        assert!(!dir.path().join("backup.json.tmp").exists());
+    }
+
+    #[test]
+    fn import_backup_rejects_a_file_too_large_to_be_a_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("huge.json");
+        std::fs::write(&path, vec![b'x'; (MAX_BACKUP_BYTES + 1) as usize]).unwrap();
+
+        assert!(import_backup(path.to_string_lossy().into_owned()).is_err());
+    }
+
+    #[test]
+    fn import_backup_reports_a_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nope.json");
+        assert!(import_backup(path.to_string_lossy().into_owned()).is_err());
+    }
+
+    #[test]
+    fn export_backup_overwrites_an_existing_backup() {
+        // 같은 이름으로 다시 내보내기는 흔한 사용 패턴이다.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backup.json");
+        std::fs::write(&path, "old").unwrap();
+
+        export_backup(path.to_string_lossy().into_owned(), "new".to_string()).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+    }
+
+    #[test]
+    fn export_backup_cleans_up_the_temp_file_when_rename_fails() {
+        // 대상이 디렉터리면 rename 이 실패한다. 그때 .tmp 가 남으면 안 된다.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backup.json");
+        std::fs::create_dir(&path).unwrap();
+
+        assert!(export_backup(path.to_string_lossy().into_owned(), "x".to_string()).is_err());
+
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "임시 파일이 남았다: {leftovers:?}");
+    }
+
+    #[test]
+    fn import_backup_accepts_a_file_exactly_at_the_size_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("edge.json");
+        std::fs::write(&path, vec![b'x'; MAX_BACKUP_BYTES as usize]).unwrap();
+
+        let read = import_backup(path.to_string_lossy().into_owned()).unwrap();
+
+        assert_eq!(read.len() as u64, MAX_BACKUP_BYTES);
+    }
+
+    #[test]
+    fn import_backup_rejects_non_utf8_content_without_panicking() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("binary.json");
+        std::fs::write(&path, [0xff, 0xfe, 0x00, 0x01]).unwrap();
+
+        assert!(import_backup(path.to_string_lossy().into_owned()).is_err());
+    }
+
+    #[test]
+    fn backup_commands_refuse_paths_that_are_not_json() {
+        // 다이얼로그를 거치지 않은 호출이 임의 파일을 읽거나 덮어쓰지 못하게 한다.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secrets.env");
+        std::fs::write(&path, "TOKEN=x").unwrap();
+
+        assert!(import_backup(path.to_string_lossy().into_owned()).is_err());
+        assert!(export_backup(path.to_string_lossy().into_owned(), "y".to_string()).is_err());
+        // 거부된 export 가 기존 파일을 건드리지 않았는지 확인한다.
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "TOKEN=x");
+    }
+
+    #[test]
+    fn save_settings_clamps_out_of_range_values_via_sanitize() {
+        // 백업 import 로 들어온 비정상 범위 값이 그대로 저장되면 안 된다.
+        let clamped = crate::settings::sanitize(Settings {
+            text_scale: 99999,
+            suggest_max_results: 999999,
+            pron_volume: 300,
+            ..Default::default()
+        });
+
+        assert_eq!(clamped.text_scale, 140);
+        assert_eq!(clamped.suggest_max_results, 50);
+        assert_eq!(clamped.pron_volume, 100);
     }
 }

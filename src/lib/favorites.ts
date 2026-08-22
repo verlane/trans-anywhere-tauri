@@ -52,7 +52,8 @@ export function normalizeFavorites(raw: unknown): FavoriteItem[] {
     }
     if (entry && typeof entry === "object" && typeof (entry as FavoriteItem).term === "string") {
       const item = entry as FavoriteItem;
-      return [{ term: item.term, gloss: typeof item.gloss === "string" ? item.gloss : "" }];
+      const gloss = typeof item.gloss === "string" ? item.gloss : "";
+      return [{ term: item.term, gloss: gloss.slice(0, GLOSS_MAX) }];
     }
     return [];
   });
